@@ -1,0 +1,102 @@
+# What goes into the source distribution.
+#
+# ## Why this file exists
+#
+# `python -m build` did not finish in ten minutes on this repository, and the reason is that setuptools walks the
+# whole tree looking for files to include. Eleven directories here are **deliberately huge and deliberately not
+# ours**: the extracted rival harness trees total about 1 GB, the vendored/alternate virtualenvs add ~300 MB, and the
+# package-manager caches add more. None of it belongs in a release, and shipping it would produce an sdist larger
+# than most users' disk quota for a 60k-line project.
+#
+# Everything excluded below is already in `.gitignore`, so a git-based sdist would skip it -- but the default
+# behaviour without an explicit file is to walk the filesystem, and a build that has to stat a million files is a
+# build nobody will run. This file makes the exclusion explicit and fast.
+#
+# ## What is INCLUDED, and why each one matters
+#
+# These are the non-Python files a wheel must carry or the installed package is quietly broken. All four were
+# confirmed present in the built wheel rather than assumed:
+#
+#   * `myriaxon/builtin_skills/*/SKILL.md` -- the shipped skill. Without it `use_skill` finds nothing.
+#   * `myriaxon/bench/tasks/*` -- the IQB-14 evaluation suite. Without it `myriaxon bench` has no tasks.
+#   * `myriaxon/brand/assets/*.svg` -- the brand assets the dashboard serves.
+#   * `py.typed` -- so a type checker treats the installed package as typed.
+#
+# `README.md`, `LICENSE` and `pyproject.toml` come in by default for an sdist and are listed anyway, because a
+# missing LICENSE in a release is a licensing problem rather than a packaging one.
+
+include README.md
+include LICENSE
+include pyproject.toml
+include CHANGELOG.md
+include INSTALL.md
+
+recursive-include myriaxon/builtin_skills *.md
+recursive-include myriaxon/builtin_roles *.md
+recursive-include myriaxon/bench/tasks *
+recursive-include myriaxon/brand/assets *.svg
+include myriaxon/py.typed
+
+# ---------------------------------------------------------------------------------------
+# Excluded. Grouped by why, so a future reader can tell a deliberate omission from an oversight.
+# ---------------------------------------------------------------------------------------
+
+# The extracted rival harness trees. Somebody else's code, kept on disk for capability comparison and read-only.
+# Reproducing the conclusions does not require carrying the trees: those live in docs/HARNESS_RESEARCH.md.
+prune openclaw-src
+prune opencode-dev-src
+prune pi-harness-main-src
+prune claude-code-main-src
+prune deepseek-harness-master-src
+prune redteam
+
+# Virtualenvs. `pyproject.toml` records that `.venv-harbor-linux` needs Python 3.12 while the agent needs 3.11, so
+# the two cannot share one -- but neither belongs in a release.
+#
+# `.uv` is 0.41 GB and was MISSING from this list. `.gitignore` excludes it, which is why it never appeared in a
+# `git status`, but `MANIFEST.in` governs the sdist independently of git and setuptools walks the filesystem. It is
+# uv's cache plus a downloaded CPython, so it is the same class of omission as `.npmcache` and `.pnpm-store`, which
+# were added for exactly this reason. Found by listing the dot-directories at the repo root against the prune list
+# rather than by trusting that the earlier sweep had caught them all.
+prune .venv
+prune .venv-harbor-linux
+prune .tooling
+prune .uv
+prune .npmcache
+prune .pnpm-store
+prune .corepack
+
+# Session state, caches and build output. `.myriaxon` holds a real user's transcripts and config, and a release that
+# shipped somebody's conversation history would be a privacy failure rather than a packaging one.
+#
+# A `prune` and an `exclude` for the same name is redundant -- `prune` removes the directory and everything in it, so
+# setuptools reported `warning: no previously-included files found matching '.myriaxon'` for the second line. That
+# warning is the file telling us a rule does nothing, which is worth removing rather than tolerating.
+prune .myriaxon
+prune .git
+prune .github
+prune htmlcov
+prune .pytest_cache
+prune .ruff_cache
+prune .mypy_cache
+prune __pycache__
+
+# Compiled and packaged byproducts.
+#
+# Written out one suffix per line. `global-exclude *.py[cod]` was the first attempt and it does nothing: `[]` is
+# fnmatch syntax, not glob, and setuptools reported
+# `warning: no previously-included files matching '*.py[cod]' found anywhere in distribution`. A rule that silently
+# matches nothing is worse than no rule, because it reads as protection.
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude *.so
+global-exclude *.dll
+global-exclude *.dylib
+global-exclude *.zip
+global-exclude *.log
+global-exclude .DS_Store
+
+# Extracted reference trees generally, so the next source drop cannot slip hundreds of megabytes into a release by
+# being forgotten -- the same rule `.gitignore` uses, for the same reason.
+prune *-src

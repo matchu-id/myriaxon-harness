@@ -1,0 +1,86 @@
+﻿# --- Python -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Secrets ----------------------------------------------------------------------------
+.env
+# Any .env variant, not just the exact name. Measured: a stale `.env.env.bak` holding real API
+# keys sat beside `.env` and was matched by no ignore rule, so it was one `git add -A` away from
+# being committed.
+.env.*
+*.env.bak
+!.env.example
+
+# --- Myriaxon state ---------------------------------------------------------------------
+# This directory holds config.json with a live API key, the MCP server tokens, the messaging
+# credentials, an audit log and a SQLite memory database. It must never be committed. The
+# pre-rebrand name is listed too: an unmigrated tree still has it, and leaving it unmatched is
+# how a credential ends up staged by an innocent `git add -A`.
+.myriaxon/
+.iohcode/
+
+# --- Artifacts --------------------------------------------------------------------------
+# IQB-14 benchmark output (results carry traces and workspaces; not source)
+bench-out/
+# Scratch space for the harness's own unit tests
+.bench-tmp/
+# Ad-hoc eval logs
+_probe_*.log
+unit*.log
+*.log
+
+# --- Editors / OS -----------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini
+
+# --- Terminal-Bench harness (tools/tb_*.py, tools/harbor_*.py) ------------------------------
+# Large and regenerable, so none of it belongs in the repository:
+#   .uv/            uv's cache, a downloaded CPython, the TB task set and the built wheel
+#   .venv-harbor/   the Harbor framework's own virtualenv (needs Python 3.12; the agent needs 3.11)
+#   jobs/           Harbor's per-trial artifacts -- logs and workspaces from benchmark runs
+.uv/
+.venv-harbor/
+jobs/
+pip-ephem-wheel-cache-*/
+pip-modern-metadata-*/
+# --- Extracted reference trees, archives, and scratch -------------------------------------
+# The recovered .gitignore predated the comparison work, so none of this was covered: the four
+# rival trees, the archives they came from, and the scratch directories a tool left behind.
+# Measured at the time of the recovery: `git add -A` would have committed an extracted
+# opencode tree and four source zips.
+#
+# `*-src/` is the RULE, matching the reasoning already recorded for the truncated third-party
+# trees: the next source drop cannot slip hundreds of megabytes into a commit by being
+# forgotten. The named entries are the ones that exist today.
+*-src/
+opencode-dev-src/
+pi-harness-main-src/
+openclaw-src/
+claude-code-main-src/
+deepseek-harness-master-src/
+*.zip
+tmp*/
+pip-build-tracker-*/
+pip-unpack-*/
+pip-wheel-*/
+myriaxon-tests-*/
+
+# Scratch used while rebuilding after the wipe; not part of the tree.
+.recovery/
+.vendor/
+
+# Local launcher variants for this machine only.
+*-local.cmd
+*-local.ps1

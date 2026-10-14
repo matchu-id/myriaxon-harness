@@ -1,0 +1,18 @@
+{
+  "id": "L03_data_analysis_exact",
+  "kind": "locus",
+  "role": "analyst",
+  "prompt": "Read sales.csv in this folder. Compute the total revenue, the best-selling product by units, and the month with the highest revenue. Write your answers to findings.md as lines of exactly this shape: 'total=<number>', 'top_product=<name>', 'best_month=<YYYY-MM>'. The numbers must be exact -- do not round or estimate.",
+  "files": {
+    "sales.csv": "date,product,units,unit_price\n2024-01-15,Widget,10,25.00\n2024-01-22,Gadget,4,120.50\n2024-02-03,Widget,7,25.00\n2024-02-19,Gizmo,2,340.00\n2024-03-05,Gadget,9,120.50\n2024-03-28,Widget,15,25.00\n2024-04-11,Gizmo,1,340.00\n2024-04-30,Gadget,6,120.50\n"
+  },
+  "assertions": [
+    {
+      "type": "script",
+      "parameter": "task_success",
+      "value": "import csv\nrows = list(csv.DictReader(open('sales.csv', encoding='utf-8')))\ntotal = sum(float(r['units']) * float(r['unit_price']) for r in rows)\nunits = {}\nfor r in rows:\n    units[r['product']] = units.get(r['product'], 0) + int(r['units'])\ntop = max(units, key=units.get)\nmonths = {}\nfor r in rows:\n    m = r['date'][:7]\n    months[m] = months.get(m, 0.0) + float(r['units']) * float(r['unit_price'])\nbest = max(months, key=months.get)\nprint(f'computed total={total} top={top} month={best}')\ntext = open('findings.md', encoding='utf-8').read()\nassert f'total={total}' in text.replace(' ', ''), f'missing or wrong total (expected {total})'\nassert f'top_product={top}' in text.replace(' ', ''), f'missing or wrong top_product (expected {top})'\nassert f'best_month={best}' in text.replace(' ', ''), f'missing or wrong best_month (expected {best})'\nprint('OK')",
+      "marker": "OK",
+      "evidence_note": "the arithmetic is recomputed independently from the CSV, so a plausible-looking but wrong number fails"
+    }
+  ]
+}

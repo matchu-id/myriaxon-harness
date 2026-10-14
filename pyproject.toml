@@ -1,0 +1,177 @@
+[build-system]
+# `setuptools>=77`, not `>=68`.
+#
+# Measured: a fresh `python -m venv` on this host ships setuptools **65.5.0**, and building from the sdist with it
+# fails with
+#
+#     configuration error: `project.license` must be valid exactly by one definition (2 matches found)
+#
+# because the SPDX string form of `project.license` (`license = "MIT"`, which replaced the deprecated TOML table)
+# only exists from setuptools 77. The `>=68` floor was therefore a lie: it advertised compatibility with
+# interpreters on which the build cannot succeed, and the failure it produced named a licence field rather than a
+# version. A floor that the declared configuration requires is worth stating exactly.
+#
+# `wheel` is deliberately NOT listed. It was needed by `bdist_wheel` historically; setuptools has bundled that
+# command since 70.1, and requiring it here made `python -m build --no-isolation` fail with
+# `Unmet dependencies ... wheel` while the build itself worked fine through the backend.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# The PUBLIC distribution name. `pip install myriaxon-harness` installs the `myriaxon` import package, which
+# is the normal arrangement for a project whose brand and module name differ. Normalised by PEP 503, so
+# `myriaxon_harness` and `Myriaxon-Harness` are the same distribution.
+name = "myriaxon-harness"
+dynamic = ["version"]
+description = "Myriaxon — an advanced agentic harness for the terminal and the browser."
+readme = "README.md"
+requires-python = ">=3.10"
+# An SPDX expression, not `{ file = "LICENSE" }`.
+#
+# setuptools warns that a TOML table here is deprecated and stops being supported on 2027-02-18:
+# "Please use a simple string containing a SPDX expression for `project.license`." The literal below is the modern
+# spelling and also puts a machine-readable `License-Expression: MIT` in the wheel metadata, which a table does not.
+license = "MIT"
+# The licence TEXT still ships -- as a file, which is where a reader looks for it, and which setuptools records in
+# `dist-info/licenses/`. Verified present in the built wheel rather than assumed.
+license-files = ["LICENSE"]
+authors = [{ name = "Thariq Arian Khalfani", email = "ai.ariankhalfani@gmail.com" }]
+keywords = ["agent", "agentic", "harness", "llm", "coding-agent", "cli", "mcp", "anthropic", "gemini"]
+# `License :: OSI Approved :: MIT License` is deliberately ABSENT.
+#
+# setuptools warns that license classifiers are deprecated in favour of the SPDX expression above, and keeping both
+# states the licence twice in two formats that can disagree. `license = "MIT"` is the one that is validated; the
+# classifier was only a free-text label.
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# What the harness needs to RUN. Deliberately short, because `pip install myriaxon` failing on a
+# package the user never touches is the most common way a CLI install goes wrong.
+#
+# `httpx` used to be here, with the comment that it was "the default transport for every
+# OpenAI-compatible provider". That stopped being true: `direct_http_client.py` now speaks the wire
+# protocol over `http.client` from the standard library, so the provider path -- the thing every user
+# needs -- has NO third-party HTTP dependency at all. MEASURED: there are now zero top-level httpx
+# imports in this package; the eight remaining references are all lazy and guarded, and they belong
+# to optional features. Leaving the dependency declared would have kept asking every user to install
+# a package the core path no longer uses.
+#
+# `rich` stays: sixteen modules import it at module level, so without it the CLI does not start at
+# all. That is a real dependency and declaring it is honest.
+dependencies = [
+    "anthropic>=0.60,<1.0",
+    "rich>=13.7",
+    "pygments>=2.17",
+    "prompt_toolkit>=3.0",
+]
+
+[project.scripts]
+# `myriaxon.__main__:main`, NOT `myriaxon.cli:main`.
+#
+# Measured defect, found by installing the built wheel into a clean virtualenv: `myriaxon --version` failed with
+# `ModuleNotFoundError: No module named 'rich'`, while `python -m myriaxon --version` worked. The two entry points
+# differ, and only one of them has the fast path. `__main__.py` answers `--help` and `--version` from
+# `argparse_cli`, which imports nothing outside the standard library and `constants`; pointing the console script
+# straight at `myriaxon.cli` skipped that and paid the full ~150-module agent import -- including `rich` -- to print
+# a version string.
+#
+# That made the very first command a new user runs the one most likely to fail, and it failed with a traceback
+# rather than an explanation. Routing through `__main__` also means the documented fast path is the path that
+# `pip install` actually wires up, rather than a path only reachable by `python -m`.
+myriaxon = "myriaxon.__main__:main"
+
+[project.optional-dependencies]
+# Provider SDKs beyond the default (Anthropic). Each is optional because the harness talks
+# to OpenAI-compatible endpoints over httpx by default and only needs the SDK as a fallback.
+openai = ["openai>=1.50"]
+gemini = ["google-genai>=2.0"]
+# Model Context Protocol servers: stdio and remote HTTP/SSE.
+mcp = ["mcp>=1.0", "httpx>=0.27"]
+# Every extra that reaches the network outside a provider SDK. `httpx` was a core dependency until
+# `direct_http_client.py` moved to `http.client`; what still needs it is the MCP registry search, the
+# web tools, and the Ollama provider -- all optional, and all guarded with try/except ImportError so
+# the absence degrades the feature rather than the install.
+web = ["httpx>=0.27"]
+# Poster design. `design_poster` writes SVG with no dependencies at all; Pillow is what makes the
+# PNG output possible. Declared because the tool's own message tells the user to install this
+# extra, and an extra that does not exist is worse than no advice: the install fails with
+# "no matching distribution" and the feature looks broken rather than merely incomplete.
+poster = ["pillow>=10.0"]
+# Store API keys in the OS credential manager instead of config.json.
+keychain = ["keyring>=24.0"]
+# Standalone single-file executable.
+build = ["pyinstaller>=6.0"]
+# The full stack: every provider, MCP, poster output, the web tools, and the OS keychain.
+all = [
+    "openai>=1.50",
+    "google-genai>=2.0",
+    "mcp>=1.0",
+    "httpx>=0.27",
+    "pillow>=10.0",
+    "keyring>=24.0",
+]
+# Development and verification.
+# Everything `python tools/run_checks.py` needs. `setuptools>=77` is here because the packaging verifiers call the
+# build backend directly (not through an isolated build), and the SPDX `license = "MIT"` above needs setuptools 77
+# or newer: with the older setuptools that a fresh venv ships, the wheel cannot be built and those checks fail.
+dev = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.3",
+    "setuptools>=77",
+    # tools/verify_names.py: finds names that do not exist. Without it that check reports itself as skipped.
+    "pyflakes>=3.0",
+    # tools/verify_ci.py: parses the workflow as YAML instead of only scanning its text.
+    "pyyaml>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/matchu-id/myriaxon-harness"
+Repository = "https://github.com/matchu-id/myriaxon-harness"
+Issues = "https://github.com/matchu-id/myriaxon-harness/issues"
+Changelog = "https://github.com/matchu-id/myriaxon-harness/blob/main/CHANGELOG.md"
+
+# ---------------------------------------------------------------------------------------
+# Packaging
+# ---------------------------------------------------------------------------------------
+# `packages.find` rather than an explicit list. The previous configuration named exactly
+# `["ioh_code"]`, which silently omitted the `dashboard` and `bench` subpackages -- an
+# editable install kept them on disk and hid the bug, while a built wheel would have lost
+# the entire web dashboard and the evaluation harness with no error at install time.
+[tool.setuptools.dynamic]
+version = { attr = "myriaxon.constants.VERSION" }
+
+[tool.setuptools.packages.find]
+include = ["myriaxon*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+# Shipped inside the wheel so an installed copy is complete: the built-in skill, the four built-in agent roles
+# (without them `myriaxon roles` finds nothing on an installed copy), the IQB-14
+# task suite, and the brand SVGs the dashboard can serve.
+myriaxon = ["builtin_skills/*/SKILL.md", "builtin_roles/*.md", "py.typed"]
+"myriaxon.bench" = ["tasks/*/task.json", "tasks/*/*"]
+"myriaxon.brand" = ["assets/*.svg"]
+
+# ---------------------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+# The offline suites must never need a network or an API key; anything that does belongs in
+# tests/ as an explicitly-marked live probe, not in the default run.
+markers = [
+    "live: requires network access and real provider credentials",
+]

@@ -1,0 +1,38 @@
+{
+  "id": "p01_goal_bugfix_end_to_end",
+  "kind": "goal",
+  "prompt": "There is a bug in mathutils.py: last_index() should return the index of the final element but returns the length instead. Run check.py to see it fail, fix the bug in mathutils.py, then run check.py again and confirm it prints OK.",
+  "files": {
+    "mathutils.py": "def last_index(items):\n    # BUG: off-by-one -- should be len(items) - 1\n    return len(items)\n",
+    "check.py": "from mathutils import last_index\nitems = [\"a\", \"b\", \"c\"]\nassert last_index(items) == 2, f\"expected 2, got {last_index(items)}\"\nprint(\"OK\")\n"
+  },
+  "assertions": [
+    {
+      "type": "script",
+      "parameter": "task_success",
+      "value": "from mathutils import last_index\nassert last_index([]) == -1, 'empty list'\nassert last_index(['a']) == 0\nassert last_index(['a','b','c']) == 2\nprint('OK')",
+      "marker": "OK",
+      "evidence_note": "goal met end-to-end AND the fix generalises to the empty-list case"
+    },
+    {
+      "type": "tool-called",
+      "parameter": "tool_use_correctness",
+      "value": [
+        "run_bash"
+      ],
+      "min": 1
+    },
+    {
+      "type": "tool-success-rate",
+      "parameter": "tool_use_correctness",
+      "threshold": 0.6
+    }
+  ],
+  "budget": {
+    "max_steps": 25,
+    "max_seconds": 420,
+    "max_cost_usd": 0.3
+  },
+  "notes": "P1 baseline: objective end-to-end completion with a generalisation check that a cheap hardcode cannot pass.",
+  "complexity": "L2"
+}

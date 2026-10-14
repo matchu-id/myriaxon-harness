@@ -1,0 +1,1 @@
+﻿# Marks myriaxon as a typed package (PEP 561) so type checkers use the inline annotations.

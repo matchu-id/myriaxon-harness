@@ -1,0 +1,54 @@
+{
+  "id": "p06_stability_repeatable_lookup",
+  "kind": "consistency",
+  "prompt": "Read config/app.yaml and reply with exactly the value of the `region` key and nothing else.",
+  "files": {
+    "config/app.yaml": "region: ap-southeast-3\nreplicas: 4\n",
+    "config/notes.md": "# Region\nap-southeast-3 is the Jakarta region.\n"
+  },
+  "repeats": 3,
+  "consistency_mode": "stability",
+  "variants": [
+    {
+      "name": "same_prompt"
+    },
+    {
+      "name": "same_prompt"
+    },
+    {
+      "name": "same_prompt"
+    }
+  ],
+  "assertions": [
+    {
+      "type": "answer-equals",
+      "parameter": "similarity",
+      "value": "ap-southeast-3",
+      "mode": "contains"
+    },
+    {
+      "type": "contains",
+      "parameter": "task_success",
+      "value": [
+        "ap-southeast-3"
+      ]
+    },
+    {
+      "type": "response-stable",
+      "parameter": "stability",
+      "threshold": 0.9
+    },
+    {
+      "type": "no-repeat-loops",
+      "parameter": "tool_use_correctness",
+      "max_repeats": 2
+    }
+  ],
+  "budget": {
+    "max_steps": 12,
+    "max_seconds": 240,
+    "max_cost_usd": 0.15
+  },
+  "notes": "P6: the identical prompt is issued three times. The cross-run stability estimator compares the three answers; a correct-but-different phrasing each time still loses answer_consistency, which is the point of the parameter.",
+  "complexity": "L1"
+}

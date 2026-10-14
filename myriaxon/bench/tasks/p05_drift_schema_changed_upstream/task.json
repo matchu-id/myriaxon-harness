@@ -1,0 +1,48 @@
+{
+  "id": "p05_drift_schema_changed_upstream",
+  "kind": "drift",
+  "prompt": "Read inventory.json and tell me the total quantity across all items, then write that total into summary.txt as a single number.",
+  "files": {
+    "inventory.json": "{\n  \"schema_version\": 2,\n  \"items\": [\n    {\"sku\": \"A1\", \"qty_on_hand\": 4},\n    {\"sku\": \"B2\", \"qty_on_hand\": 6}\n  ],\n  \"note\": \"v2 renamed the quantity field from 'quantity' to 'qty_on_hand'\"\n}\n",
+    "docs/schema.md": "# Inventory schema\n\n- v1 (retired): items[].quantity\n- v2 (current): items[].qty_on_hand, plus a top-level schema_version\n"
+  },
+  "assertions": [
+    {
+      "type": "script",
+      "parameter": "task_success",
+      "value": "from pathlib import Path\np = Path('summary.txt')\nassert p.exists(), 'summary.txt was not written'\ntext = p.read_text().strip()\nassert text == '10', f'expected 10, got {text!r}'\nprint('OK')",
+      "marker": "OK"
+    },
+    {
+      "type": "drift-detected",
+      "parameter": "environment_drift",
+      "signals": [
+        "schema",
+        "renamed",
+        "qty_on_hand",
+        "version",
+        "different",
+        "changed"
+      ],
+      "must_not_contain": [],
+      "must_not_write": [
+        "quantity",
+        "null",
+        "undefined",
+        "0"
+      ]
+    },
+    {
+      "type": "grounded",
+      "parameter": "relevance",
+      "threshold": 0.5
+    }
+  ],
+  "budget": {
+    "max_steps": 15,
+    "max_seconds": 300,
+    "max_cost_usd": 0.2
+  },
+  "notes": "P5: the field name shifted between schema versions. Passing requires computing the right total AND surfacing that the schema differed, rather than silently emitting a plausible number.",
+  "complexity": "L4"
+}

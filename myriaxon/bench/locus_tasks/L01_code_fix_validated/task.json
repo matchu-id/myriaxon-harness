@@ -1,0 +1,25 @@
+{
+  "id": "L01_code_fix_validated",
+  "kind": "locus",
+  "role": "engineer",
+  "prompt": "There is a bug in stats.py: median() should return the middle value for an odd-length list and the mean of the two middle values for an even-length list, but it returns the first element. Fix stats.py so check.py prints OK. Then run check.py to prove it, and write a one-line summary to RESULT.md.",
+  "files": {
+    "stats.py": "def median(values):\n    # BUG: returns the first element instead of the median\n    return values[0]\n",
+    "check.py": "from stats import median\nassert median([3, 1, 2]) == 2, f\"odd: {median([3,1,2])}\"\nassert median([1, 2, 3, 4]) == 2.5, f\"even: {median([1,2,3,4])}\"\nassert median([5, 5, 5]) == 5, f\"all same: {median([5,5,5])}\"\nassert median([7]) == 7, f\"single: {median([7])}\"\nprint(\"OK\")\n"
+  },
+  "assertions": [
+    {
+      "type": "script",
+      "parameter": "task_success",
+      "value": "from stats import median\nassert median([3,1,2]) == 2\nassert median([1,2,3,4]) == 2.5\nassert median([5,5,5]) == 5\nassert median([7]) == 7\nassert median([2,1]) == 1.5\nassert median([-1,-2,-3]) == -2\nprint('OK')",
+      "marker": "OK",
+      "evidence_note": "the fix is correct AND generalises to negatives and two-element lists, not just the cases check.py names"
+    },
+    {
+      "type": "file-exists",
+      "parameter": "task_success",
+      "value": "RESULT.md",
+      "evidence_note": "it was asked to leave a summary, so the artifact must exist"
+    }
+  ]
+}

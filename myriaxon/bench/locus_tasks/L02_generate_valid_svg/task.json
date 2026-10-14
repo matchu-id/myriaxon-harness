@@ -1,0 +1,23 @@
+{
+  "id": "L02_generate_valid_svg",
+  "kind": "locus",
+  "role": "designer",
+  "prompt": "Create logo.svg in this folder: a square 256x256 logo with a dark background (#0A0C11), a mint accent (#7CF5C8), and a geometric mark built from at least three shapes. It must be valid SVG that renders. Then write colors.md listing every hex colour you used and what each one is for.",
+  "files": {},
+  "assertions": [
+    {
+      "type": "script",
+      "parameter": "task_success",
+      "value": "import xml.etree.ElementTree as ET\nroot = ET.parse('logo.svg').getroot()\ntag = root.tag.split('}')[-1]\nassert tag == 'svg', f'root element is {tag}, not svg'\nns = {'s': 'http://www.w3.org/2000/svg'}\nshapes = root.findall('.//s:rect', ns) + root.findall('.//s:circle', ns) + root.findall('.//s:polygon', ns) + root.findall('.//s:path', ns) + root.findall('.//s:ellipse', ns)\nassert len(shapes) >= 3, f'only {len(shapes)} shapes, asked for at least three'\ntext = open('logo.svg', encoding='utf-8').read()\nassert '#0A0C11' in text.upper(), 'the requested background colour is missing'\nassert '#7CF5C8' in text.upper(), 'the requested mint accent is missing'\nprint('OK')",
+      "marker": "OK",
+      "evidence_note": "the SVG parses as XML, has an svg root, carries three or more drawable shapes, and uses both requested colours -- parsed rather than eyeballed"
+    },
+    {
+      "type": "script",
+      "parameter": "task_success",
+      "value": "text = open('colors.md', encoding='utf-8').read().upper()\nassert '#0A0C11' in text and '#7CF5C8' in text, 'colors.md does not list both colours in use'\nassert len(text.strip()) > 40, 'colors.md is effectively empty'\nprint('OK')",
+      "marker": "OK",
+      "evidence_note": "an SVG alone does not document a palette; the second artifact must name the colours it used"
+    }
+  ]
+}

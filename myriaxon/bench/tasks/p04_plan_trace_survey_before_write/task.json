@@ -1,0 +1,81 @@
+{
+  "id": "p04_plan_trace_survey_before_write",
+  "kind": "plan_trace",
+  "prompt": "Add input validation to the public functions in service.py: reject non-positive amounts with a ValueError. First understand how the module is used by reading the callers, then make the change, then prove it works by running the existing self-check.",
+  "files": {
+    "service.py": "def deposit(balance, amount):\n    return balance + amount\n\n\ndef withdraw(balance, amount):\n    return balance - amount\n\n\nif __name__ == \"__main__\":\n    assert deposit(10, 5) == 15\n    assert withdraw(10, 5) == 5\n    print(\"SELF-CHECK OK\")\n",
+    "callers/payments.py": "from service import deposit\n\n\ndef pay(balance, amount):\n    return deposit(balance, amount)\n",
+    "callers/refunds.py": "from service import withdraw\n\n\ndef refund(balance, amount):\n    return withdraw(balance, amount)\n"
+  },
+  "assertions": [
+    {
+      "type": "script",
+      "parameter": "task_success",
+      "value": "import subprocess, sys\nr = subprocess.run([sys.executable, 'service.py'], capture_output=True, text=True)\nassert r.returncode == 0, r.stderr\nfrom service import deposit, withdraw\nfor fn in (deposit, withdraw):\n    try:\n        fn(10, 0)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError(f'{fn.__name__} accepted 0')\n    try:\n        fn(10, -5)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError(f'{fn.__name__} accepted a negative amount')\nassert deposit(10, 5) == 15 and withdraw(10, 5) == 5\nprint('OK')",
+      "marker": "OK"
+    },
+    {
+      "type": "tool-order",
+      "parameter": "reasoning_plan",
+      "value": [
+        "read_file",
+        "edit_file"
+      ],
+      "evidence_note": "a grounded plan reads before it writes"
+    },
+    {
+      "type": "tool-called",
+      "parameter": "reasoning_plan",
+      "value": [
+        "read_file"
+      ],
+      "min": 2,
+      "evidence_note": "the prompt asks to understand the callers first"
+    },
+    {
+      "type": "uses-tools",
+      "parameter": "reasoning_plan",
+      "min_distinct": 3
+    },
+    {
+      "type": "rubric",
+      "parameter": "comprehensiveness",
+      "critical": false,
+      "points": [
+        {
+          "id": "callers",
+          "any_of": [
+            "payments",
+            "refunds",
+            "caller"
+          ]
+        },
+        {
+          "id": "validation",
+          "any_of": [
+            "non-positive",
+            "positive",
+            "valueerror"
+          ]
+        },
+        {
+          "id": "verified",
+          "any_of": [
+            "self-check",
+            "self check",
+            "ran",
+            "passes"
+          ]
+        }
+      ],
+      "threshold": 0.66
+    }
+  ],
+  "budget": {
+    "max_steps": 30,
+    "max_seconds": 480,
+    "max_cost_usd": 0.35
+  },
+  "notes": "P4: the trace itself is the evidence -- read-before-write ordering, breadth of reading, and multi-tool work. A conclusion reached without reading the callers fails the order assertion even if the code happens to work.",
+  "complexity": "L3"
+}

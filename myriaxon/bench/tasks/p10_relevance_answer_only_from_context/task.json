@@ -1,0 +1,73 @@
+{
+  "id": "p10_relevance_answer_only_from_context",
+  "kind": "grounding",
+  "prompt": "Using only the files in this workspace, tell me the retention period for audit records and which storage tier they are kept in. Cite the file you used for each fact.",
+  "files": {
+    "policies/retention.md": "# Retention\nAudit records are retained for 7 years, then deleted.\n",
+    "policies/storage.md": "# Storage tiers\nAudit records are stored in the `archive-cold` tier after 90 days. Operational logs use `hot-30`.\n",
+    "policies/unrelated.md": "# Expenses\nReceipts are kept for 3 years.\n"
+  },
+  "assertions": [
+    {
+      "type": "contains",
+      "parameter": "relevance",
+      "value": [
+        "7 years",
+        "archive-cold",
+        "retention.md",
+        "storage.md"
+      ],
+      "all": true
+    },
+    {
+      "type": "grounded",
+      "parameter": "relevance",
+      "threshold": 0.8
+    },
+    {
+      "type": "not-contains",
+      "parameter": "hallucination_risk",
+      "value": [
+        "3 years",
+        "hot-30",
+        "s3",
+        "glacier"
+      ],
+      "evidence_note": "3 years is the expenses answer and s3/glacier are invented -- both are grounding failures"
+    },
+    {
+      "type": "rubric",
+      "parameter": "comprehensiveness",
+      "critical": false,
+      "points": [
+        {
+          "id": "retention",
+          "any_of": [
+            "7 years"
+          ]
+        },
+        {
+          "id": "tier",
+          "any_of": [
+            "archive-cold"
+          ]
+        },
+        {
+          "id": "citations",
+          "any_of": [
+            "retention.md",
+            "storage.md"
+          ]
+        }
+      ],
+      "threshold": 1.0
+    }
+  ],
+  "budget": {
+    "max_steps": 12,
+    "max_seconds": 240,
+    "max_cost_usd": 0.15
+  },
+  "notes": "P10: the workspace contains a plausible wrong answer (3 years, for expenses) and the correct answer lives in two different files. Answering from general knowledge, or from the wrong file, both fail.",
+  "complexity": "L2"
+}

@@ -1,0 +1,31 @@
+# Normalise line endings so a checkout on Windows and a checkout on Linux produce the same
+# bytes. Without this, a file written on one platform shows as wholly modified on the other,
+# which buries real changes in noise and makes reviews useless.
+* text=auto eol=lf
+
+# Windows launchers must keep CRLF: cmd.exe is unreliable with LF-only batch files.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets: never touched, never diffed.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.xlsx binary
+*.pyc binary
+*.db binary
+*.whl binary
+
+# Generated files. Marked so GitHub collapses them in diffs and linguist ignores them in
+# language statistics.
+brand/*.svg linguist-generated
+docs/BRAND.md linguist-documentation
+README.md linguist-documentation
+CHANGELOG.md linguist-documentation
+INSTALL.md linguist-documentation
+
+# Keep the shell installer's executable intent explicit for POSIX checkouts.
+install.sh text eol=lf

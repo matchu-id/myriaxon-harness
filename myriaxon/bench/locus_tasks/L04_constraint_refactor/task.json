@@ -1,0 +1,32 @@
+{
+  "id": "L04_constraint_refactor",
+  "kind": "locus",
+  "role": "engineer",
+  "prompt": "config.py has a get_setting() function with four repeated if/elif branches that all do the same thing. Refactor it so the repetition is gone, WITHOUT changing its behaviour for any input. Hard constraint: the refactored file must be no longer than 30 lines. Prove behaviour is unchanged by running verify.py, which must still print OK. Save the ORIGINAL config.py as config.py.bak before you touch it.",
+  "files": {
+    "config.py": "DEFAULTS = {\n    'timeout': 30,\n    'retries': 3,\n    'host': 'localhost',\n    'port': 8080,\n}\n\n\ndef get_setting(name, overrides=None):\n    overrides = overrides or {}\n    if name == 'timeout':\n        if name in overrides:\n            return overrides[name]\n        return DEFAULTS['timeout']\n    elif name == 'retries':\n        if name in overrides:\n            return overrides[name]\n        return DEFAULTS['retries']\n    elif name == 'host':\n        if name in overrides:\n            return overrides[name]\n        return DEFAULTS['host']\n    elif name == 'port':\n        if name in overrides:\n            return overrides[name]\n        return DEFAULTS['port']\n    else:\n        raise KeyError(name)\n",
+    "verify.py": "from config import get_setting, DEFAULTS\nassert get_setting('timeout') == 30\nassert get_setting('retries') == 3\nassert get_setting('host') == 'localhost'\nassert get_setting('port') == 8080\nassert get_setting('timeout', {'timeout': 99}) == 99\nassert get_setting('host', {'host': 'example.com'}) == 'example.com'\nassert get_setting('port', {'port': 1}) == 1\ntry:\n    get_setting('nope')\n    raise SystemExit('should have raised KeyError')\nexcept KeyError:\n    pass\nassert get_setting('timeout', {}) == 30\nprint('OK')\n"
+  },
+  "assertions": [
+    {
+      "type": "script",
+      "parameter": "task_success",
+      "value": "import subprocess, sys\nr = subprocess.run([sys.executable, 'verify.py'], capture_output=True, text=True, timeout=120)\nassert 'OK' in r.stdout, f'verify.py no longer passes: {r.stdout[-200:]} {r.stderr[-300:]}'\nprint('OK')",
+      "marker": "OK",
+      "evidence_note": "behaviour preserved -- the refactor is judged by running the original test, not by reading the diff"
+    },
+    {
+      "type": "script",
+      "parameter": "task_success",
+      "value": "lines = open('config.py', encoding='utf-8').read().splitlines()\nassert len(lines) <= 30, f'config.py is {len(lines)} lines, the constraint was 30'\ntext = open('config.py', encoding='utf-8').read()\nimport re\nbranches = len(re.findall(r\"name == '\", text))\nassert branches <= 1, f'the repetition is still there: {branches} name == branches'\nprint('OK')",
+      "marker": "OK",
+      "evidence_note": "the HARD constraint is checked separately from correctness, so a working refactor that ignores the line limit fails honestly"
+    },
+    {
+      "type": "file-exists",
+      "parameter": "task_success",
+      "value": "config.py.bak",
+      "evidence_note": "an explicit instruction was to preserve the original; skipping it is a compliance failure"
+    }
+  ]
+}

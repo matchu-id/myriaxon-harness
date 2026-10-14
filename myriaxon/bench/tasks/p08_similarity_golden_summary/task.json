@@ -1,0 +1,73 @@
+{
+  "id": "p08_similarity_golden_summary",
+  "kind": "golden",
+  "prompt": "Read release_notes.md and summarize what changed in version 2.4.0 in two or three sentences.",
+  "files": {
+    "release_notes.md": "# Release notes\n\n## 2.4.0\n- Added streaming support for the export pipeline.\n- Fixed a crash when the config file was empty.\n- Deprecated the legacy `--fast` flag.\n\n## 2.3.1\n- Documentation only.\n",
+    "golden/expected_summary.txt": "Version 2.4.0 added streaming support for the export pipeline, fixed a crash caused by an empty config file, and deprecated the legacy --fast flag."
+  },
+  "assertions": [
+    {
+      "type": "similar",
+      "parameter": "similarity",
+      "path": "golden/expected_summary.txt",
+      "threshold": 0.5
+    },
+    {
+      "type": "contains",
+      "parameter": "similarity",
+      "value": [
+        "streaming",
+        "empty config",
+        "--fast"
+      ],
+      "all": true,
+      "critical": false
+    },
+    {
+      "type": "rubric",
+      "parameter": "comprehensiveness",
+      "points": [
+        {
+          "id": "streaming",
+          "any_of": [
+            "streaming"
+          ]
+        },
+        {
+          "id": "crash",
+          "any_of": [
+            "crash",
+            "empty config",
+            "config file"
+          ]
+        },
+        {
+          "id": "deprecated",
+          "any_of": [
+            "deprecat",
+            "--fast",
+            "fast flag"
+          ]
+        }
+      ],
+      "threshold": 0.99
+    },
+    {
+      "type": "not-contains",
+      "parameter": "hallucination_risk",
+      "value": [
+        "2.3.1",
+        "documentation only"
+      ],
+      "evidence_note": "the prior release must not be attributed to 2.4.0"
+    }
+  ],
+  "budget": {
+    "max_steps": 10,
+    "max_seconds": 240,
+    "max_cost_usd": 0.15
+  },
+  "notes": "P8: similarity against an approved golden answer, both by text similarity and by required-point recall. The not-contains assertion stops a summary of the wrong release section scoring well.",
+  "complexity": "L2"
+}

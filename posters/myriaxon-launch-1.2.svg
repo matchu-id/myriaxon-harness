@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350" role="img">
+<rect width="1080" height="1350" fill="#0A0C11"/>
+<rect x="0.0" y="0.0" width="1080.0" height="1350.0" fill="#0A0C11"/>
+<line x1="955.8" y1="74.2" x2="955.8" y2="1154.2" stroke="#2E3444" stroke-width="2.0" opacity="0.500"/>
+<line x1="955.8" y1="74.2" x2="917.2" y2="101.8" stroke="#2E3444" stroke-width="1.6" opacity="0.450"/>
+<line x1="917.2" y1="101.8" x2="864.0" y2="88.9" stroke="#2E3444" stroke-width="1.6" opacity="0.320"/>
+<circle cx="864.0" cy="88.9" r="4.4" fill="#7CF5C8" opacity="0.800"/>
+<line x1="955.8" y1="254.2" x2="896.0" y2="296.9" stroke="#2E3444" stroke-width="1.6" opacity="0.450"/>
+<line x1="896.0" y1="296.9" x2="813.5" y2="277.0" stroke="#2E3444" stroke-width="1.6" opacity="0.320"/>
+<circle cx="813.5" cy="277.0" r="4.4" fill="#7CF5C8" opacity="0.800"/>
+<line x1="955.8" y1="434.2" x2="896.0" y2="476.9" stroke="#2E3444" stroke-width="1.6" opacity="0.450"/>
+<line x1="896.0" y1="476.9" x2="813.5" y2="457.0" stroke="#2E3444" stroke-width="1.6" opacity="0.320"/>
+<circle cx="813.5" cy="457.0" r="4.4" fill="#7CF5C8" opacity="0.800"/>
+<line x1="955.8" y1="614.2" x2="899.1" y2="654.8" stroke="#2E3444" stroke-width="1.6" opacity="0.450"/>
+<line x1="899.1" y1="654.8" x2="820.8" y2="635.9" stroke="#2E3444" stroke-width="1.6" opacity="0.320"/>
+<circle cx="820.8" cy="635.9" r="4.4" fill="#7CF5C8" opacity="0.800"/>
+<line x1="955.8" y1="794.2" x2="896.0" y2="836.9" stroke="#2E3444" stroke-width="1.6" opacity="0.450"/>
+<line x1="896.0" y1="836.9" x2="813.5" y2="817.0" stroke="#2E3444" stroke-width="1.6" opacity="0.320"/>
+<circle cx="813.5" cy="817.0" r="4.4" fill="#7CF5C8" opacity="0.800"/>
+<line x1="955.8" y1="974.2" x2="917.2" y2="1001.8" stroke="#2E3444" stroke-width="1.6" opacity="0.450"/>
+<line x1="917.2" y1="1001.8" x2="864.0" y2="988.9" stroke="#2E3444" stroke-width="1.6" opacity="0.320"/>
+<circle cx="864.0" cy="988.9" r="4.4" fill="#7CF5C8" opacity="0.800"/>
+<line x1="955.8" y1="1154.2" x2="896.0" y2="1196.9" stroke="#2E3444" stroke-width="1.6" opacity="0.450"/>
+<line x1="896.0" y1="1196.9" x2="813.5" y2="1177.0" stroke="#2E3444" stroke-width="1.6" opacity="0.320"/>
+<circle cx="813.5" cy="1177.0" r="4.4" fill="#7CF5C8" opacity="0.800"/>
+<circle cx="955.8" cy="225.5" r="3.2" fill="#7CF5C8" opacity="0.650"/>
+<circle cx="955.8" cy="484.6" r="3.2" fill="#7CF5C8" opacity="0.650"/>
+<circle cx="955.8" cy="743.9" r="3.2" fill="#7CF5C8" opacity="0.650"/>
+<circle cx="955.8" cy="1003.0" r="3.2" fill="#7CF5C8" opacity="0.650"/>
+<rect x="78.0" y="78.0" width="8.0" height="8.0" fill="#7CF5C8" rx="3.0"/>
+<text x="94.2" y="92.8" font-family="'Bahnschrift','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif" font-size="19" fill="#EDEFF5" text-anchor="start" letter-spacing="3.04">MYRIAXON</text>
+<text x="1002.0" y="92.8" font-family="'Bahnschrift','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif" font-size="19" fill="#7C8599" text-anchor="end" letter-spacing="1.52">OCTOBER 2026</text>
+<line x1="78.0" y1="123.6" x2="1002.0" y2="123.6" stroke="#232835" stroke-width="1.5" opacity="0.900"/>
+<rect x="78.0" y="348.3" width="31.5" height="3.0" fill="#7CF5C8" rx="2.0"/>
+<text x="122.1" y="351.1" font-family="'Bahnschrift','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif" font-size="21" fill="#7CF5C8" text-anchor="start" letter-spacing="4.62">RELEASE 1.2.0</text>
+<text x="78.0" y="546.8" font-family="'Bahnschrift','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif" font-size="132" fill="#EDEFF5" text-anchor="start" letter-spacing="-1.58">Ten thousand</text>
+<text x="78.0" y="729.0" font-family="'Bahnschrift','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif" font-size="132" fill="#EDEFF5" text-anchor="start" letter-spacing="-1.58">paths. One</text>
+<text x="78.0" y="911.2" font-family="'Bahnschrift','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif" font-size="132" fill="#EDEFF5" text-anchor="start" letter-spacing="-1.58">mind.</text>
+<text x="78.0" y="1013.8" font-family="'Bahnschrift','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif" font-size="30" fill="#A3ABBD" text-anchor="start">An advanced agentic harness for terminal and browser.</text>
+<rect x="78.0" y="1056.4" width="237.6" height="5.0" fill="#7CF5C8" rx="2.0"/>
+</svg>

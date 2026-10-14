@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="180" viewBox="0 0 720 180" role="img" aria-label="Myriaxon">
+  <title>Myriaxon</title>
+  <rect width="720" height="180" fill="#0A0C11"/>
+  <g transform="translate(40 40) scale(0.5)">
+    <g fill="#EDEFF5">
+      <polygon points="100,6 104.5,68 100,80 95.5,68"/>
+      <polygon points="100,6 104.5,68 100,80 95.5,68" transform="rotate(90 100 100)"/>
+      <polygon points="100,6 104.5,68 100,80 95.5,68" transform="rotate(180 100 100)"/>
+      <polygon points="100,6 104.5,68 100,80 95.5,68" transform="rotate(270 100 100)"/>
+      <polygon points="100,36 103,70 100,80 97,70" transform="rotate(45 100 100)"/>
+      <polygon points="100,36 103,70 100,80 97,70" transform="rotate(135 100 100)"/>
+      <polygon points="100,36 103,70 100,80 97,70" transform="rotate(225 100 100)"/>
+      <polygon points="100,36 103,70 100,80 97,70" transform="rotate(315 100 100)"/>
+      <circle cx="100" cy="100" r="12"/>
+    </g>
+    <circle cx="100" cy="100" r="8.5" fill="#0A0C11"/>
+    <circle cx="100" cy="100" r="4" fill="#7CF5C8"/>
+  </g>
+  <text x="150" y="100" fill="#EDEFF5" font-family="Unbounded, 'Arial Black', sans-serif"
+        font-size="58" font-weight="600" letter-spacing="0.14em">MYRIAXON</text>
+  <text x="152" y="132" fill="#7C8599" font-family="'JetBrains Mono', monospace"
+        font-size="15" letter-spacing="0.08em">TEN THOUSAND PATHS. ONE MIND.</text>
+</svg>

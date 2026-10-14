@@ -1,0 +1,55 @@
+{
+  "id": "p07_robustness_reworded_requirements",
+  "kind": "consistency",
+  "consistency_mode": "robustness",
+  "prompt": "Summarize requirements.txt: how many direct dependencies are listed, and which one is pinned to an exact version?",
+  "files": {
+    "requirements.txt": "requests==2.31.0\nrich>=13.7\npygments>=2.17\nprompt_toolkit>=3.0\n"
+  },
+  "repeats": 3,
+  "variants": [
+    {
+      "name": "plain"
+    },
+    {
+      "name": "reworded_terse",
+      "prompt": "requirements.txt: give me the count of direct deps and the exactly-pinned one."
+    },
+    {
+      "name": "reworded_formal",
+      "prompt": "Please inspect the file requirements.txt and report two facts: the total number of direct dependencies declared, and the name of the dependency that is pinned to an exact version."
+    }
+  ],
+  "assertions": [
+    {
+      "type": "contains",
+      "parameter": "task_success",
+      "value": [
+        "4",
+        "requests"
+      ]
+    },
+    {
+      "type": "contains",
+      "parameter": "robustness",
+      "value": [
+        "2.31.0"
+      ],
+      "all": false,
+      "critical": false
+    },
+    {
+      "type": "grounded",
+      "parameter": "relevance",
+      "threshold": 0.5,
+      "critical": false
+    }
+  ],
+  "budget": {
+    "max_steps": 12,
+    "max_seconds": 240,
+    "max_cost_usd": 0.15
+  },
+  "notes": "P7: the same question at three registers. Same estimator as P6 by construction, so a gap between the two parameters is a real behavioural difference rather than a formula artefact.",
+  "complexity": "L2"
+}

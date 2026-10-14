@@ -1,0 +1,84 @@
+{
+  "id": "p09_comprehensiveness_onboarding_brief",
+  "kind": "rubric",
+  "prompt": "Read ONBOARDING.md and write BRIEF.md for a new engineer. It must cover, in this order: how to run the test suite, the branch naming convention, and where secrets are stored. Keep it under 200 words.",
+  "files": {
+    "ONBOARDING.md": "# Onboarding\n\n## Running tests\nRun `python -m pytest tests/` from the repository root. The suite needs no network access.\n\n## Branches\nBranch names are `feature/<ticket>-<slug>`, `fix/<ticket>-<slug>`, or `chore/<slug>`. Never commit directly to main.\n\n## Secrets\nAll secrets live in the team vault under `eng/payments`. Local development uses a `.env` file that is gitignored. Never paste a secret into a ticket or a chat message.\n\n## Code review\nTwo approvals are required for anything touching the payments service.\n"
+  },
+  "assertions": [
+    {
+      "type": "rubric",
+      "parameter": "comprehensiveness",
+      "points": [
+        {
+          "id": "tests",
+          "source": "file",
+          "path": "BRIEF.md",
+          "any_of": [
+            "pytest",
+            "test suite",
+            "python -m pytest"
+          ]
+        },
+        {
+          "id": "branches",
+          "source": "file",
+          "path": "BRIEF.md",
+          "any_of": [
+            "feature/",
+            "fix/",
+            "chore/"
+          ]
+        },
+        {
+          "id": "secrets",
+          "source": "file",
+          "path": "BRIEF.md",
+          "any_of": [
+            "vault",
+            "eng/payments",
+            ".env"
+          ]
+        }
+      ],
+      "threshold": 1.0
+    },
+    {
+      "type": "file-exists",
+      "parameter": "task_success",
+      "value": [
+        "BRIEF.md"
+      ]
+    },
+    {
+      "type": "script",
+      "parameter": "task_success",
+      "value": "from pathlib import Path\ntext = Path('BRIEF.md').read_text()\nwords = len(text.split())\nassert words <= 220, f'{words} words -- over the 200-word limit'\nprint('OK')",
+      "marker": "OK",
+      "evidence_note": "the constraint in the prompt is part of the task, not an aside"
+    },
+    {
+      "type": "grounded",
+      "parameter": "relevance",
+      "threshold": 0.5,
+      "critical": false
+    },
+    {
+      "type": "not-contains",
+      "parameter": "hallucination_risk",
+      "value": [
+        "two approvals",
+        "payments service"
+      ],
+      "critical": false,
+      "evidence_note": "code review policy was deliberately not requested -- including it is scope creep, not thoroughness"
+    }
+  ],
+  "budget": {
+    "max_steps": 15,
+    "max_seconds": 300,
+    "max_cost_usd": 0.2
+  },
+  "notes": "P9: coverage of three mandated points AND a length constraint AND a scope-creep probe. Measures 'covers every required point' without rewarding dumping every fact found.",
+  "complexity": "L3"
+}
