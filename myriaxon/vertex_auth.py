@@ -140,7 +140,30 @@ def invalidate() -> None:
 
 
 def project() -> str:
-    return (os.environ.get("MYRIAXON_VERTEX_PROJECT") or DEFAULT_PROJECT).strip()
+    """The project to use, in the order a reader expects.
+
+    `GOOGLE_CLOUD_PROJECT` IS CONSULTED, and that is a fix rather than a convenience. Removing the hardcoded
+    default left this reading only MYRIAXON_VERTEX_PROJECT, so a machine configured the DOCUMENTED way -- the
+    variable the google-genai SDK itself reads, and the one `docs/VERTEX-SETUP.md` tells you to set -- resolved
+    to an empty project and produced:
+
+        https://aiplatform.googleapis.com/v1/projects//locations/global/...
+        400 RESOURCE_PROJECT_INVALID
+
+    Measured: with only `GOOGLE_CLOUD_PROJECT` set, `generate_url()` returned a URL with an empty project
+    segment. The hardcoded default had been hiding that by supplying a project nobody had configured.
+
+    Order: the Myriaxon-specific override first, then the standard Google variable, then `gcloud`'s own
+    configuration. Empty means genuinely unconfigured, and `_require_project` turns that into a message naming
+    what to set instead of a URL that cannot work.
+    """
+    explicit = (os.environ.get("MYRIAXON_VERTEX_PROJECT") or "").strip()
+    if explicit:
+        return explicit
+    standard = (os.environ.get("GOOGLE_CLOUD_PROJECT") or "").strip()
+    if standard:
+        return standard
+    return (DEFAULT_PROJECT or "").strip()
 
 
 def location() -> str:
