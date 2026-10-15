@@ -1153,6 +1153,27 @@ def _run_bash(tool_input: dict, ctx: ToolContext) -> tuple[str, bool]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            # UTF-8 WITH REPLACEMENT, and both halves are load-bearing.
+            #
+            # `text=True` alone decodes with the PROCESS LOCALE, which on Windows is cp1252. Measured live: a
+            # command emitting a non-ASCII byte killed the reader thread --
+            #
+            #     UnicodeDecodeError: 'charmap' codec can't decode byte 0x81 in position 75
+            #       File "myriaxon\tools.py", line 1193, in _drain_foreground
+            #         for line in proc.stdout:
+            #
+            # -- and the failure was INVISIBLE from the outside. The traceback went to stderr, the command
+            # still "ran", and the model received less output than the command produced with nothing anywhere
+            # saying so. That is the worst shape a bug can take: it does not stop the work, it silently
+            # shrinks what the agent can see, on any command whose output contains a non-ASCII byte. Real
+            # ones: a build tool's box-drawing characters, a test runner's check marks, a path with an accent,
+            # and this project's own arrow and em-dash output.
+            #
+            # `errors="replace"` because a decode failure must never cost the WHOLE command: one undecodable
+            # byte becomes U+FFFD and the other ten thousand lines survive. Without it, a single stray byte in
+            # a log file throws away everything the command said.
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
             cwd=os.getcwd(),
         )

@@ -396,6 +396,9 @@ class DashboardApp:
         if getattr(self, "_supervisor", None) is not None:
             return
         stop = threading.Event()
+        # The last refusal per locus, so a permanently-unrunnable one is explained once instead of every
+        # interval. Keyed by name and compared by reason, so a DIFFERENT problem is still reported.
+        self._supervisor_refusals: dict[str, str] = {}
 
         def loop() -> None:
             # A first pass immediately, so opening the dashboard advances overdue work rather than
@@ -410,13 +413,33 @@ class DashboardApp:
                         # manual Run is refused rather than doubled -- the same protection a second
                         # process gets.
                         try:
-                            self.run_locus(locus)
+                            outcome = self.run_locus(locus)
                         except Exception as exc:  # noqa: BLE001 - one bad locus must not stop the loop
                             # Printed rather than logged: this module has no logger, and a supervisor
                             # that silently swallows a failing locus is indistinguishable from one that
                             # is not running at all -- which is the exact confusion this whole change
                             # exists to remove.
                             print(f"  supervisor: could not run {locus.name}: {exc}")
+                            continue
+
+                        # A REFUSED RUN IS REPORTED, ONCE. `run_locus` returns `accepted: False` rather than
+                        # raising, and this loop used to discard that -- so a locus that was due, enabled and
+                        # proactive but had nothing to work on was retried every interval, refused every time,
+                        # and said nothing. Measured: `anker` sat in that state for 26 minutes while
+                        # `last_run_at` never advanced, because a refused run does not stamp it -- which
+                        # means `is_due()` stays true forever and the locus is permanently due and
+                        # permanently idle, with no output anywhere to explain it.
+                        #
+                        # Said ONCE per distinct reason, because the useful fact is "this one cannot run, and
+                        # here is why". Repeating it every interval would turn a diagnosable state into a log
+                        # nobody reads, which is the failure mode this reporting exists to avoid.
+                        if isinstance(outcome, dict) and not outcome.get("accepted", True):
+                            reason = str(outcome.get("reason") or "refused")
+                            if self._supervisor_refusals.get(locus.name) != reason:
+                                self._supervisor_refusals[locus.name] = reason
+                                print(f"  supervisor: {locus.name} is due but cannot run -- {reason}")
+                        else:
+                            self._supervisor_refusals.pop(locus.name, None)
                 except Exception as exc:  # noqa: BLE001
                     print(f"  supervisor: pass failed: {exc}")
                 stop.wait(interval)
