@@ -1351,27 +1351,168 @@ def _is_ignored(path: Path, root: Path, patterns: list[str]) -> bool:
     return False
 
 
+# Directories a search must never descend into. These are the ones that turn a bounded scan into a
+# filesystem walk: a package cache, a virtual environment or a container image can each hold a million
+# files, and none of them can contain an answer to a question about the user's project.
+_SEARCH_NEVER_DESCEND = frozenset({
+    ".git", ".hg", ".svn", "node_modules", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    ".venv", "venv", "env", ".tox", ".nox", "site-packages", "dist-info", ".egg-info",
+    "Windows", "System32", "SysWOW64", "WinSxS", "ProgramData", "Program Files", "Program Files (x86)",
+    "$Recycle.Bin", "System Volume Information", "AppData", "proc", "sys", "dev", "run", "snap",
+    "Library", "Applications", ".Trash", ".cache", "Caches",
+})
+
+
+def _is_filesystem_root(path: Path) -> bool:
+    """True for `/`, `C:\\`, and a UNC share root.
+
+    A search from here is never what somebody means. It cannot be completed quickly on any machine, and its
+    result -- "no files matched" -- is indistinguishable from "nothing exists", while having cost minutes. The
+    measured case: `glob_search(path="/", pattern="**/anker/**")` ran for **132 seconds** before returning
+    "No files matched", which an agent reads as a finding about the filesystem rather than as its own mistake.
+    """
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    if resolved.parent == resolved:
+        return True
+    # A drive root on Windows: `C:\` has itself as its own parent.
+    return bool(resolved.drive) and str(resolved).rstrip("\\/") in (resolved.drive, resolved.drive + "\\")
+
+
+def _glob_to_regex(pattern: str):
+    """Compile a glob into a regex over a POSIX-style RELATIVE path.
+
+    WHY NOT `fnmatch`. `fnmatch` treats `*` as "anything, including separators", so `**/*.py` and `*.py`
+    become the same expression and a recursive search silently returns the wrong set. Worse, `**/*.py` does not
+    even match `src/main.py` under it, because the compiled pattern demands a literal separator before the
+    filename -- which is exactly the bug an earlier version of this function shipped: the walk was correct, the
+    pruning was correct, and the match returned nothing for a pattern every user would write.
+
+    The mapping is the standard one:
+        `**/`  -> zero or more whole path segments   (so `**/*.py` matches `a.py` AND `src/a.py`)
+        `**`   -> anything at all, separators included
+        `*`    -> anything EXCEPT a separator        (so `*.py` stays this directory only)
+        `?`    -> one character, not a separator
+    """
+    out: list[str] = []
+    index = 0
+    length = len(pattern)
+    while index < length:
+        char = pattern[index]
+        if char == "*":
+            if pattern.startswith("**/", index):
+                # Zero or more segments: "any/prefix/" or nothing at all.
+                out.append("(?:[^/]*/)*")
+                index += 3
+                continue
+            if pattern.startswith("**", index):
+                out.append(".*")
+                index += 2
+                continue
+            out.append("[^/]*")
+            index += 1
+            continue
+        if char == "?":
+            out.append("[^/]")
+            index += 1
+            continue
+        if char in "[{":
+            # Let `fnmatch.translate` handle a character class rather than reimplementing it.
+            close = "]" if char == "[" else "}"
+            end = pattern.find(close, index + 1)
+            if end != -1:
+                body = pattern[index:end + 1]
+                out.append(fnmatch.translate(body)[4:-3] if char == "[" else ".*")
+                if char == "{":
+                    # Brace expansion is not worth reimplementing; treat the set loosely.
+                    out[-1] = "(?:" + "|".join(re.escape(o) for o in body[1:-1].split(",")) + ")"
+                index = end + 1
+                continue
+        out.append(re.escape(char))
+        index += 1
+    return re.compile("^" + "".join(out) + "$")
+
+
+def _walk_bounded(base: Path, pattern: str, ignore_patterns) -> tuple[list[Path], bool]:
+    """Yield files under `base` matching `pattern`, bounded in TIME and COUNT, with directory pruning.
+
+    WHY THIS EXISTS RATHER THAN `base.glob(pattern)`. The previous implementation checked a time budget inside
+    the loop over `glob()` results, and that check could not fire: `Path.glob` discovers every directory it is
+    going to yield from BEFORE it yields the first result, so a recursive pattern over a large tree spends its
+    whole cost inside the generator and the budget is consulted for the first time after the work is done. The
+    budget was real, and unreachable.
+
+    `os.walk` visits lazily and `dirnames[:] =` prunes IN PLACE -- so a pruned subtree is never descended into,
+    which is where nearly all of the cost was. The time check below therefore runs between directories, while
+    the expensive thing is still ahead of it.
+
+    Returns (matches, truncated). A caller must report truncation rather than present a partial scan as
+    complete, because "No files matched" from a scan that stopped early is a false statement about the system.
+    """
+    matches: list[Path] = []
+    truncated = False
+    scanned = 0
+    started = time.monotonic()
+    matcher = _glob_to_regex(pattern)
+
+    for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=False):
+        if time.monotonic() - started > SEARCH_TIME_BUDGET_SECONDS or scanned > SEARCH_SCAN_CAP:
+            truncated = True
+            break
+
+        # Pruned in place, so `os.walk` never enters them. This is the line that turns a 132-second walk into
+        # an instant answer, because the cost was in the directories nobody wanted searched.
+        dirnames[:] = [
+            name for name in dirnames
+            if name not in _SEARCH_NEVER_DESCEND and not _is_ignored(Path(root) / name, base, ignore_patterns)
+        ]
+
+        for filename in filenames:
+            scanned += 1
+            if scanned > SEARCH_SCAN_CAP:
+                truncated = True
+                break
+            candidate = Path(root) / filename
+            try:
+                relative = candidate.relative_to(base).as_posix()
+            except ValueError:
+                relative = candidate.as_posix()
+            # Matched as a RELATIVE path, which is what makes `**/x` span directories and `*` not.
+            if matcher.match(relative) and not _is_ignored(candidate, base, ignore_patterns):
+                matches.append(candidate)
+        if scanned > SEARCH_SCAN_CAP:
+            break
+
+    return matches, truncated
+
+
 def _glob_search(tool_input: dict) -> tuple[str, bool]:
     base = _resolve(tool_input.get("path", ".") or ".")
     if not base.exists():
         return f"Directory not found: {base}", True
 
-    ignore_patterns = _load_ignore_patterns(base)
-    # Bounded scan -- confirmed live this matters: with no `path` given, this defaults to the
-    # *shell's* cwd, which may not be the project root (e.g. a parent folder containing several
-    # large, unrelated projects) -- without a hard budget, glob() fully enumerates the entire
-    # tree before sorted() can even start, which can run for a very long time / feel "stuck".
-    start = time.monotonic()
-    candidates: list[Path] = []
-    truncated = False
-    for i, p in enumerate(base.glob(tool_input["pattern"])):
-        if i >= SEARCH_SCAN_CAP or time.monotonic() - start > SEARCH_TIME_BUDGET_SECONDS:
-            truncated = True
-            break
-        if p.is_file() and not _is_ignored(p, base, ignore_patterns):
-            candidates.append(p)
+    if _is_filesystem_root(base):
+        # Refused rather than attempted, and the refusal says what to pass instead. An agent that asked for
+        # `/` did not want the whole machine; it wanted to find something and did not know where, so the
+        # message has to teach the narrower question rather than only deny this one.
+        return (
+            f"Refused: {base} is a filesystem root, and searching from here would scan the whole machine "
+            "-- measured at over two minutes, and it cannot match anything a project search would want. "
+            "Pass the directory you actually mean (for example the project root, or a subdirectory), or use "
+            "`path` with a narrower `pattern`. If you are looking for a named directory and do not know where "
+            "it is, search from the project root or ask the user where their projects live.",
+            True,
+        )
 
-    matches = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)[:SEARCH_MATCH_CAP]
+    ignore_patterns = _load_ignore_patterns(base)
+    pattern = tool_input["pattern"]
+    # Bounded scan -- confirmed live this matters: with no `path` given, this defaults to the *shell's* cwd,
+    # which may not be the project root (e.g. a parent folder containing several large, unrelated projects).
+    matches, truncated = _walk_bounded(base, pattern, ignore_patterns)
+
+    matches = sorted(matches, key=lambda p: p.stat().st_mtime, reverse=True)[:SEARCH_MATCH_CAP]
     if not matches:
         if truncated:
             return _search_truncated_notice("No files matched"), False
