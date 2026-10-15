@@ -200,6 +200,20 @@ server. Two different lifecycles should not share one command.
 
 ## Quickstart
 
+**New here?** Two documents cover everything, in order:
+
+| | |
+|---|---|
+| **[docs/HOW-TO-USE.md](docs/HOW-TO-USE.md)** | install, first run, the dashboard, the transparency dial, loci, the swarm board, permissions, troubleshooting |
+| **[docs/API-KEYS.md](docs/API-KEYS.md)** | putting in a **DeepSeek** or **Netra** key, Gemini through Vertex with no key at all, Ollama with no account, and which setting outranks which |
+
+The shortest path:
+
+```bash
+myriaxon --reauth      # pick a provider, paste a key, done
+myriaxon web           # the dashboard at http://127.0.0.1:8765
+```
+
 ### 1. Configure a provider (once)
 
 ```powershell
@@ -967,6 +981,8 @@ python scripts\check_ui_visual.py     # real Chrome via CDP; skip when no browse
 
 | Document | Contents |
 |---|---|
+| [docs/HOW-TO-USE.md](docs/HOW-TO-USE.md) | **start here**: install, first run, dashboard, transparency dial, loci, troubleshooting |
+| [docs/API-KEYS.md](docs/API-KEYS.md) | **DeepSeek, Netra, Vertex, Ollama keys**, precedence, and where a key is never written |
 | [docs/BRAND.md](docs/BRAND.md) | the identity: mark geometry, palette, type, terminal glyphs, CLI themes |
 | [docs/IQB-14.md](docs/IQB-14.md) | the evaluation standard, normative |
 | [docs/MCP-SETUP.md](docs/MCP-SETUP.md) | connecting stdio and remote MCP servers |
