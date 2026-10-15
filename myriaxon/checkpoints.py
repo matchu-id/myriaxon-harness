@@ -32,7 +32,8 @@ CHECKPOINT_LIST_TOOL_DEF = {
 CHECKPOINT_RESTORE_TOOL_DEF = {
     "name": "checkpoint_restore",
     "description": (
-        "Restore a file to the content captured in a given checkpoint id (see checkpoint_list). "
+        "Roll a file back to a snapshot: restore or revert it to the content captured in a given checkpoint id "
+        "(see checkpoint_list). Undo an edit by naming the checkpoint taken before it. "
         "This overwrites the file's current content -- requires user confirmation, and itself "
         "creates a new checkpoint first, so a restore can be undone."
     ),

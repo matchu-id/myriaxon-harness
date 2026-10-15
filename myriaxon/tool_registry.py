@@ -38,9 +38,9 @@ from .tool_context import ToolContext
 TASK_TOOL_DEF = {
     "name": "task",
     "description": (
-        "Launch a sub-agent to autonomously perform a self-contained task and return its final "
-        "answer. Use for open-ended exploration or multi-step work that would otherwise consume "
-        "a lot of your own context. The sub-agent shares your tools (except spawning further "
+        "Hand work to another agent: launch a sub-agent to autonomously perform a self-contained task and "
+        "return its final answer. Delegate open-ended exploration or multi-step work that would otherwise "
+        "consume a lot of your own context. The sub-agent shares your tools (except spawning further "
         "sub-agents) but starts with no conversation history — give it all the context it needs "
         "in the prompt."
     ),

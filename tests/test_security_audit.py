@@ -101,6 +101,98 @@ class TestWebFetchRefusesLocalAndPrivateHosts:
         assert web_tools._refuse_reason("http://127.0.0.1:9/") == ""
 
 
+class TestOneExecutionGate:
+    """Every path that runs a shell asks the SAME question.
+
+    Two failures in this repository had one shape: a control that held on the path it was written for and not on
+    another path doing the same thing. `run_bash` refused a confined shell without a sandbox; a Locus condition,
+    which also runs a shell, consulted none of that. The confinement gate guarded file tools; `member_workspace`
+    returned a path inside the directory it trusted.
+
+    Both were a decision duplicated rather than shared. `shell_may_run` is now the only answer to "may a shell
+    run here", and these tests hold that in place.
+    """
+
+    def _gate(self, **kwargs):
+        from myriaxon.tools import shell_may_run
+
+        return shell_may_run(**kwargs)
+
+    def test_a_session_may_run_a_shell(self):
+        """Unconfined: a person is present, and `confirm_action` owns the prompt."""
+        allowed, reason = self._gate(confined=None)
+        assert allowed is True and reason == ""
+
+    def test_a_confined_context_may_not_without_a_sandbox(self):
+        allowed, reason = self._gate(confined="/some/workspace", sandbox_requested=False)
+        assert allowed is False
+        assert "cannot be confined" in reason
+
+    def test_a_confined_context_may_not_even_when_a_sandbox_was_requested_but_is_absent(self):
+        """`sandbox_requested` is a request, not a guarantee -- availability decides."""
+        allowed, _ = self._gate(confined="/some/workspace", sandbox_requested=True)
+        # This machine has no Docker or Windows Sandbox, so the request cannot be honoured.
+        from myriaxon import tools
+
+        if not (tools.docker_available() or tools.windows_sandbox_available()):
+            assert allowed is False
+        else:
+            assert allowed is True
+
+    def test_run_bash_uses_the_shared_gate(self):
+        """Asserted on code, so a re-derived copy cannot creep back in."""
+        import ast
+        import inspect
+
+        from myriaxon import tools
+
+        function = ast.parse(inspect.getsource(tools.confirm_action)).body[0]
+        body = [n for n in function.body
+                if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
+        code = ast.unparse(ast.Module(body=body, type_ignores=[]))
+        assert "shell_may_run" in code, "confirm_action re-derives the shell decision"
+
+    def test_conditions_use_the_shared_gate(self):
+        """The path that bypassed every control, now asking the same question."""
+        import ast
+        import inspect
+
+        from myriaxon import conditions
+
+        source = inspect.getsource(conditions)
+        assert "shell_may_run" in source, "conditions run a shell without asking the shared gate"
+        # And the superseded mechanism is gone, so there is one policy rather than two.
+        assert "MYRIAXON_CONDITIONS_ALLOW_SHELL" not in ast.unparse(ast.parse(source)), (
+            "a second, independent shell policy is back"
+        )
+
+    def test_a_command_condition_is_refused_and_says_why(self, tmp_path):
+        """End to end: the exploit from the audit must not write the file."""
+        from myriaxon import conditions
+
+        marker = tmp_path / "pwned.txt"
+        condition = conditions.Condition(
+            kind="command", command=f"echo pwned > {marker}", description="audit probe")
+        result = condition.evaluate()
+
+        assert marker.exists() is False, "a condition executed a shell command"
+        assert result.error is True, "the refusal must be reported, not silent"
+        assert "cannot be confined" in result.detail
+
+    def test_the_refusal_is_reported_rather_than_swallowed(self, tmp_path):
+        """A monitor that quietly stopped working is worse than one asking for permission.
+
+        `holds=True` with `error=True` is deliberate: the condition does not fire, and the failure is visible
+        rather than reading as "the thing you were watching is fine".
+        """
+        from myriaxon import conditions
+
+        condition = conditions.Condition(
+            kind="command", command="echo hi", description="probe")
+        result = condition.evaluate()
+        assert result.holds is True and result.error is True
+
+
 class TestTheWebhookSecretIsComparedConstantTime:
     """The second hole: `supplied != config.secret` leaks the secret's prefix by timing."""
 

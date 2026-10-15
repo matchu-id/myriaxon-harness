@@ -239,6 +239,52 @@ def _is_risky_bash(command: str) -> bool:
     return bool(_RISKY_BASH_RE.search(command))
 
 
+def shell_may_run(*, confined: str | Path | None = None, sandbox_requested: bool = False) -> tuple[bool, str]:
+    """Whether a SHELL COMMAND may run here. Returns (allowed, reason-when-not).
+
+    ONE DECISION, NAMED ONCE, because the alternative has already failed twice in this repository and both
+    failures were the same shape -- a control that held on the path it was written for and not on another path
+    that does the same thing:
+
+      * `run_bash` refused a shell to a confined Locus unless a real sandbox was available. A **Locus
+        condition**, which also runs a shell, consulted none of that and executed freely. Verified: a condition
+        whose command was `echo pwned > <path>` wrote the file, while the identical string through `run_bash`
+        was refused.
+      * The confinement gate for file tools lives in `_resolve`, and `member_workspace()` returned a path inside
+        the directory that gate was told to trust.
+
+    Neither was a missing check in a place somebody forgot to look. Both were a check that existed in one of two
+    places that needed it, which is what duplicated decisions produce. So this function is the answer to "may a
+    shell run here", and callers ask it rather than re-deriving it.
+
+    WHAT IT DOES NOT DECIDE: whether the action is *wanted*. `confirm_action` still owns mode, yolo, governance
+    policy and the prompt; this owns only the question that is identical on every path -- is a shell
+    COMPATIBLE with the isolation this code is running under.
+
+    `confined` is the Locus workspace, or None for a session. A session is unconfined by construction: the
+    person is present and `confirm_action` will ask them. A confined Locus has nobody to ask, so a shell is
+    permitted only when a real sandbox is available to enforce the isolation that was requested -- otherwise it
+    would run with the full rights of this process under the name of isolation.
+    """
+    if not confined:
+        # A session, with a person present. The prompt is the control, and `confirm_action` owns it.
+        return True, ""
+
+    if sandbox_requested:
+        if docker_available():
+            return True, ""
+        if windows_sandbox_available():
+            return True, ""
+
+    return False, (
+        "a shell command cannot be confined to this Locus's workspace, and no sandbox is available to isolate "
+        "it. File tools are unrestricted inside the workspace; a shell would run with the full rights of the "
+        "account that started Myriaxon, which is not the isolation this Locus was given.\n"
+        "Install Docker Desktop (or enable Windows Sandbox) and set `sandbox_enabled` for Locus runs, or use "
+        "the file tools, which ARE confined."
+    )
+
+
 def confirm_action(
     console: Console, panel: Panel, ctx: ToolContext, tool_name: str, command: str | None = None,
     tool_input: dict | None = None,
@@ -277,18 +323,15 @@ def confirm_action(
     if getattr(ctx, "locus_workspace", ""):
         if tool_name != "run_bash":
             return True, None
-        if ctx.sandbox_enabled and docker_available():
-            return True, None
-        if ctx.sandbox_enabled and windows_sandbox_available():
-            return True, None
-        return False, (
-            "Blocked: a shell command cannot be confined to this Locus's workspace, and no sandbox "
-            "is available to isolate it. File tools are unrestricted inside the workspace; a shell "
-            "would run with the full rights of the account that started Myriaxon, which is not the "
-            "isolation this Locus was given.\n"
-            "Install Docker Desktop (or enable Windows Sandbox) and set `sandbox_enabled` for Locus "
-            "runs, or use the file tools, which ARE confined."
+        # The shell question is asked of `shell_may_run`, not answered again here. See its docstring for the
+        # two failures that made one shared decision necessary.
+        allowed, reason = shell_may_run(
+            confined=ctx.locus_workspace,
+            sandbox_requested=bool(getattr(ctx, "sandbox_enabled", False)),
         )
+        if allowed:
+            return True, None
+        return False, f"Blocked: {reason}"
 
     # Governance policy (settings.json permissions) is checked before yolo/mode -- "deny" must
     # hold even if the user has yolo on, and "allow" is an explicit policy decision, not just a

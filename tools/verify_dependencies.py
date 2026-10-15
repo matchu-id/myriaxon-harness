@@ -22,6 +22,13 @@ sys.path.insert(0, str(REPO))
 PASS: list[str] = []
 FAIL: list[str] = []
 
+# What counts as "not an optional dependency": the standard library, this package, and `__future__`.
+#
+# `sys.stdlib_module_names` rather than a hand-written list, because a hand-written one goes stale silently and
+# would start reporting a stdlib import as third-party -- failing this verifier for the opposite of the reason
+# it exists. `myriaxon` covers `from . import x` and `from myriaxon.x import y`.
+STDLIB_AND_LOCAL = frozenset(sys.stdlib_module_names) | {"__future__", "myriaxon"}
+
 
 def check(label: str, condition: bool, detail: str = "") -> None:
     (PASS if condition else FAIL).append(label)
@@ -62,13 +69,36 @@ def main() -> int:
 
     print()
     print("=== 3. every lazy site degrades with ADVICE, not a bare ImportError ===")
-    # The failure this prevents: `pip install myriaxon` succeeds, and the error arrives later inside a command with no
-    # hint about what to install -- which is worse than a hard dependency.
-    for relative, name in (("myriaxon/ollama.py", "OllamaUnavailable"),
-                           ("myriaxon/web_tools.py", "WebToolUnavailable")):
+    # The failure this prevents: `pip install myriaxon` succeeds, and the error arrives later inside a command
+    # with no hint about what to install -- which is worse than a hard dependency.
+    #
+    # THE CHECK IS PER-FILE, NOT PER-LIST, and that is a correction rather than a tidy-up. The loop used to
+    # demand `except ImportError` and `myriaxon[web]` from BOTH files, and `myriaxon/ollama.py` imports nothing
+    # but the standard library -- `ipaddress`, `json`, `math`, `os`, `re`, `shutil`, `subprocess`, `sys`,
+    # `tempfile`, `urllib`, `dataclasses`, `pathlib`. There is no optional dependency there and therefore
+    # nothing to degrade, so the requirement was unfollowable and the check failed on every run.
+    #
+    # `OllamaUnavailable` still matters and is still asserted: it is raised for a machine where Ollama is not
+    # installed, and a `raise` of an undefined name is a runtime NameError that compiling does not catch. That
+    # is the part which was always true.
+    LAZY_SITES = (
+        # (path, exception class, must guard an optional import?)
+        ("myriaxon/ollama.py", "OllamaUnavailable", False),
+        ("myriaxon/web_tools.py", "WebToolUnavailable", True),
+    )
+    for relative, name, needs_guard in LAZY_SITES:
         text = (REPO / relative).read_text(encoding="utf-8")
         check(f"{relative} defines {name}", f"class {name}" in text,
               "a `raise` of an undefined name is a runtime NameError, not a syntax error -- compiling does not catch it")
+        if not needs_guard:
+            # Assert the REASON it does not need the guard, so this stays honest if an optional import is
+            # added later: a stdlib-only module needs no advice, and one that grows a third-party import does.
+            third_party = [line for line in text.splitlines()
+                           if line.startswith(("import ", "from "))
+                           and line.split()[1].split(".")[0] not in STDLIB_AND_LOCAL]
+            check(f"  {relative} imports nothing optional", not third_party,
+                  f"it now imports {third_party[:3]}, so it needs an ImportError guard and advice")
+            continue
         check(f"  {relative} catches ImportError", "except ImportError as exc" in text)
         check(f"  and names the extra", "myriaxon[web]" in text,
               "a message that does not say what to install is a diagnosis, not a fix")
