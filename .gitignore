@@ -1,4 +1,4 @@
-﻿# --- Python -----------------------------------------------------------------------------
+# --- Python -----------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -36,6 +36,17 @@ bench-out/
 _probe_*.log
 unit*.log
 *.log
+
+# --- A Locus's own output ------------------------------------------------------------------
+# A locus created while the dashboard is open on this repository has THIS repository as its
+# workspace, so when it is asked to write a document it writes it here. That is not a bug -- it is
+# the workspace it was given -- but the result is generated prose sitting in a source tree, one
+# `git add -A` away from being committed. Caught twice before this rule existed.
+#
+# The files are NOT deleted by this. They stay on disk; they are simply not source.
+ANKER_*.md
+*_VISION.md
+*-proof.txt
 
 # --- Editors / OS -----------------------------------------------------------------------
 .vscode/

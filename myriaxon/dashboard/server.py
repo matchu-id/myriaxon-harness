@@ -641,7 +641,7 @@ class DashboardApp:
             rebuilt += 1
         return rebuilt
 
-    def _loci_payload(self, transcript_for: str = "") -> dict:
+    def _loci_payload(self, transcript_for: str = "", transcript_names: list[str] | None = None) -> dict:
         """Every persistent agent on this machine, with the state the panel renders.
 
         Reloaded from disk on each request rather than served from a cached copy: the terminal and
@@ -740,25 +740,43 @@ class DashboardApp:
         loci = [render(d) for d in registry.all()]
         existing = {d["name"] for d in loci}
 
-        # The conversation of one locus, when the Loci page asked for it. Kept here rather than
+        # The conversation of ONE locus, when the Loci page asked for it. Kept here rather than
         # behind a second endpoint so the page has one request to make and cannot render a roster
         # that disagrees with the transcript beside it.
+        def _read_transcript(name: str) -> tuple[list[dict], str]:
+            wanted = next((d for d in registry.all() if d.name == name), None)
+            if wanted is None or not wanted.session_id:
+                return [], ""
+            session = self.sessions.get(wanted.session_id)
+            if session is None:
+                return [], wanted.session_id
+            try:
+                return [
+                    {"role": str(m.get("role") or "assistant"), "text": str(m.get("text") or "")}
+                    for m in session.messages()
+                    if str(m.get("text") or "").strip()
+                ], wanted.session_id
+            except Exception:  # noqa: BLE001 - a broken transcript must not empty the roster
+                return [], wanted.session_id
+
         transcript: list[dict] = []
         transcript_session = ""
         if transcript_for:
-            wanted = next((d for d in registry.all() if d.name == transcript_for), None)
-            if wanted is not None and wanted.session_id:
-                transcript_session = wanted.session_id
-                session = self.sessions.get(transcript_session)
-                if session is not None:
-                    try:
-                        transcript = [
-                            {"role": str(m.get("role") or "assistant"), "text": str(m.get("text") or "")}
-                            for m in session.messages()
-                            if str(m.get("text") or "").strip()
-                        ]
-                    except Exception:  # noqa: BLE001 - a broken transcript must not empty the roster
-                        transcript = []
+            transcript, transcript_session = _read_transcript(transcript_for)
+
+        # SEVERAL conversations at once, for the pane wall. One request rather than one per pane, and that is
+        # the whole reason it lives here instead of the page looping over the single-locus call: nine panes
+        # polling independently would be nine requests on a timer, each re-reading `loci.json` and rebuilding
+        # the roster -- so the cost of watching three agents work together would scale with how closely you
+        # watched. Reading each session's message list is the only part that has to happen per pane.
+        transcripts: dict[str, list[dict]] = {}
+        for name in (transcript_names or ()):
+            # Blank names are skipped HERE rather than only at the route, so the contract holds for every
+            # caller: the route strips them, the tests call this directly, and a second caller would otherwise
+            # have to remember. The alternative is an empty pane keyed by "" that nothing can draw.
+            name = (name or "").strip()
+            if name and name not in transcripts:
+                transcripts[name], _ = _read_transcript(name)
 
         # The template gallery travels with the payload so the panel can offer a one-click bot.
         # `installed` is computed here rather than in the browser: the panel should not have to
@@ -781,6 +799,7 @@ class DashboardApp:
             "templates": templates,
             "transcript": transcript,
             "transcript_session": transcript_session,
+            "transcripts": transcripts,
         }
 
     def config_payload(self) -> dict:
@@ -1186,7 +1205,13 @@ class Handler(BaseHTTPRequestHandler):
                 #
                 # `?transcript=<locus>` adds that locus's own conversation, which is how its chat
                 # pane follows a run without the Myriaxon session being switched to it.
-                return self._send_json(self.app._loci_payload(query.get("transcript", [""])[0]))
+                #
+                # `?transcripts=a,b,c` adds several at once, which is what the pane wall needs. Both are
+                # accepted so the single-pane page and the wall share one endpoint and one roster, and so a
+                # roster can never disagree with the transcripts beside it.
+                wanted = [n.strip() for n in ",".join(query.get("transcripts", [])).split(",") if n.strip()]
+                return self._send_json(self.app._loci_payload(
+                    query.get("transcript", [""])[0], wanted[:12]))
             if route == "/api/files":
                 return self._list_files(query.get("path", [""])[0])
             if route == "/api/file":

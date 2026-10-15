@@ -650,6 +650,82 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .translayer .tld { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .transdial .transfoot { font-size: 11px; }
 
+  /* ---------------------------------------------------------------- the pane wall
+     A grid of equal panes rather than a list with a detail view. `minmax(0, 1fr)` on the columns is the
+     load-bearing part: a grid track defaults to `auto`, which refuses to shrink below its content, so one
+     long unbroken line in a transcript would push the whole row wider than the dialog and the other panes
+     out of view. `minmax(0, ...)` lets a track shrink and pushes the overflow into the pane, where the
+     transcript already scrolls. */
+  .wall-dialog { width: min(1500px, 96vw); max-height: 94vh; display: flex; flex-direction: column; }
+  .wall-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 12px; }
+  .wall-spacer { flex: 1 1 auto; }
+  .wall-layouts { display: flex; align-items: center; gap: 6px; }
+  .wall-layouts button[aria-pressed="true"] { border-color: var(--blue); color: var(--blue); }
+  .wall-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .wall-grid {
+    display: grid; gap: 10px; overflow: auto; flex: 1 1 auto; min-height: 220px;
+    align-content: start; padding-right: 2px;
+  }
+  .wall-grid[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
+  .wall-grid[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wall-grid[data-cols="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  .pane {
+    display: flex; flex-direction: column; min-width: 0; min-height: 240px;
+    border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel-2); overflow: hidden;
+  }
+  /* The pane being dragged is faded rather than hidden: it is the reference for where it will land. */
+  .pane.dragging { opacity: .45; }
+  /* A drop target says so BEFORE the drop, because a drag with no visible target is a guess. */
+  .pane.drop-target, .pane.empty.drop-target { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
+  .pane.empty { border-style: dashed; align-items: center; justify-content: center; color: var(--muted); }
+  .pane.empty .pane-hint { font-size: 12px; text-align: center; padding: 12px; line-height: 1.5; }
+
+  .pane-bar {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-bottom: 1px solid var(--line); background: var(--panel);
+    cursor: grab; user-select: none; flex: none;
+  }
+  .pane-bar:active { cursor: grabbing; }
+  .pane-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  /* Working, waiting and idle are three different states and a colour alone does not carry them, so the
+     label beside the dot always says which. The colour is the fast read, the word is the reliable one. */
+  .pane-dot.working { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+  .pane-dot.waiting { background: var(--warn); }
+  .pane-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pane-what { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pane-bar .pane-actions { margin-left: auto; display: flex; gap: 4px; flex: none; }
+  .pane-bar button { padding: 1px 6px; font-size: 11px; }
+
+  .pane-body { flex: 1 1 auto; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .pane-turn { display: flex; flex-direction: column; gap: 3px; }
+  .pane-who { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .pane-bubble { font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .pane-turn.you .pane-bubble { color: var(--blue); }
+  /* Tool lines are shown because a locus's turns are mostly tool calls, and a wall that showed only prose
+     would be blank exactly while the agents were working. */
+  .pane-tool { font-size: 11px; color: var(--muted); border-left: 2px solid var(--line-2); padding-left: 6px; }
+  /* A cross-agent line. Marked, not merely coloured: this is the whole reason the wall exists. */
+  .pane-link {
+    font-size: 11px; padding: 4px 6px; border-radius: 6px;
+    background: color-mix(in srgb, var(--violet) 14%, transparent);
+    border-left: 2px solid var(--violet); color: var(--text-2);
+  }
+  .pane-composer { display: flex; gap: 6px; padding: 6px; border-top: 1px solid var(--line); flex: none; }
+  .pane-composer textarea {
+    flex: 1 1 auto; min-width: 0; resize: none; font-size: 12px; max-height: 80px;
+  }
+
+  .wall-foot { margin-top: 10px; flex: none; }
+  .wall-roster .wall-roster-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .wall-chip {
+    display: flex; align-items: center; gap: 6px; padding: 4px 8px; cursor: grab;
+    border: 1px solid var(--line-2); border-radius: 999px; font-size: 12px; background: var(--panel-2);
+  }
+  .wall-chip:active { cursor: grabbing; }
+  .wall-chip.on { border-color: var(--blue); color: var(--blue); }
+  .wall-chip .dim { font-size: 11px; }
+
   /* The core: a small live status diagram, drawn from the same health data as the list. */
   .coreslot { display: flex; align-items: center; gap: 14px; }
   .coremap { position: relative; width: 132px; height: 132px; flex: none; }
@@ -1265,6 +1341,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
     <div class="navgroup">Operate</div>
     <button data-view="approvals"><span class="ni">✓</span><span>Approvals</span><span class="ncount" id="navApprovals"></span></button>
     <button data-ui="loci"><span class="ni">✳</span><span>Loci</span><span class="ncount" id="navLocuss"></span></button>
+    <button data-ui="wall"><span class="ni">▦</span><span>The wall</span><span class="ncount" id="navWall"></span></button>
 
     <div class="navgroup">Build</div>
     <button data-ui="code"><span class="ni">🗂</span><span>Files &amp; changes</span></button>
@@ -1293,6 +1370,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <button class="menuitem" id="settingsbtn"><span class="mi-ico">⚙</span><span>Settings</span></button>
       <div class="menusect">Agents</div>
       <button class="menuitem" id="locisbtn"><span class="mi-ico">✳</span><span>Loci</span><span id="locisbadge" class="badge"></span></button>
+      <button class="menuitem" id="wallbtn" title="Several loci side by side, for watching a swarm work"><span class="mi-ico">▦</span><span>The wall</span><span id="wallbadge" class="badge"></span></button>
       <div class="menusect">Extensions</div>
       <button class="menuitem" id="mcpbtn"><span class="mi-ico">🔌</span><span>MCP servers</span><span id="mcpbadge" class="badge"></span></button>
       <button class="menuitem" id="plugbtn"><span class="mi-ico">🧩</span><span>Plugins</span><span id="plugbadge" class="badge"></span></button>
@@ -1835,13 +1913,13 @@ def register(api):
 </div>
 
 <div id="locismodal" class="modal">
-  <div class="dialog widest">
+  <div class="dialog widest" id="locisdialog">
     <h3 id="locistitle">Loci</h3>
     <p class="dim" id="locisintro">Persistent agents with their own role, standing instructions and objectives.
       <b>This page is theirs alone</b> — opening a locus here does not take over the Myriaxon chat, and a locus
       turn never appears in it. Run, pause, wake or delete any of them from the roster on the left.</p>
 
-    <div class="locilayout">
+    <div class="locilayout" id="locilayout">
 
       <!-- ---------------------------------------------------------------- the roster -->
       <div class="locifleet">
@@ -1951,6 +2029,57 @@ def register(api):
   </div>
 </div>
 
+<!-- ============================================================ the pane wall -->
+<!--
+  Several loci side by side, so a multi-agent run can be WATCHED rather than inferred. The single-pane view
+  answers "what did this one do"; this answers "what are they doing to each other", which is the question a
+  swarm actually raises and the one a one-at-a-time roster cannot show.
+
+  A separate modal rather than a mode inside the roster, because the two have different shapes: the roster is
+  a list with a detail pane, and this is a grid of equals. Forcing them into one dialog would make the roster
+  pay for the grid's layout, and the roster is the view people use most.
+-->
+<div id="wallmodal" class="modal">
+  <div class="dialog wall-dialog">
+    <h3>The wall <span class="dim" style="font-weight:400" id="wallhint"></span></h3>
+    <p class="dim">Up to nine agents at once. <b>Drag a pane by its title bar</b> to move or swap it, or drag a
+      name in from the roster on the right. Every pane polls on one shared timer, so watching more of them does
+      not ask the server more often.</p>
+
+    <div class="wall-bar">
+      <div class="wall-layouts" role="group" aria-label="Grid size">
+        <span class="dim">Grid</span>
+        <button class="ghost small" data-wall-cols="1" title="One pane">1</button>
+        <button class="ghost small" data-wall-cols="2" title="Two across">2</button>
+        <button class="ghost small" data-wall-cols="3" title="Three across">3</button>
+      </div>
+      <span class="wall-spacer"></span>
+      <label class="wall-toggle"><input type="checkbox" id="wall-links"> Show who is talking to whom</label>
+      <button class="ghost small" id="wall-live">Pause</button>
+      <button class="ghost small" id="wallclear" title="Empty every pane">Clear</button>
+    </div>
+
+    <div class="wall-grid" id="wallgrid" data-cols="2"></div>
+
+    <div class="wall-foot">
+      <div class="fieldset wall-roster">
+        <div class="fshead">Drag one in <span class="fhint" id="wallrosterhint"></span></div>
+        <div id="wallroster" class="wall-roster-list"></div>
+      </div>
+    </div>
+
+    <div class="statusline" id="wallstatusline">
+      <span class="dotmark"></span>
+      <span id="wallstatus">Ready.</span>
+    </div>
+
+    <div class="actions">
+      <button class="ghost" id="wallrefresh">Refresh now</button>
+      <button class="ghost" id="wallclose">Close</button>
+    </div>
+  </div>
+</div>
+
 <script>
 
 /* ---------- Loci, the character ----------
@@ -2020,7 +2149,7 @@ setLoci("happy");
   const $ = (id) => document.getElementById(id);
   const state = { session: null, config: null, streaming: false, attachments: [], source: null,
                   traj: [], assistantEl: null, thinkEl: null, recovering: false, dotName: "",
-                  checkedAt: 0 };
+                  checkedAt: 0, wallTranscripts: {}, wallLinks: [], wallLinkWired: false };
   const NAMES = { manual: "manual", auto_edit: "auto edit", plan: "plan", auto: "auto" };
 
   // ---------- brand mark ----------
@@ -4667,6 +4796,350 @@ function renderSettings() {
   });
   $("locirefresh").onclick = refreshLoci;
   $("locisrefresh2").onclick = refreshLoci;
+
+  // ============================================================== the pane wall
+  //
+  // Several loci side by side so a multi-agent run can be watched rather than inferred. The single-pane view
+  // answers "what did this one do"; this answers "what are they doing to each other".
+  //
+  // WHY A SEPARATE POLL RATHER THAN THE SESSION STREAM. A locus turn runs in the server's session thread, and
+  // subscribing nine panes to nine session streams would give one turn nine readers writing nine panes -- the
+  // coupling the single-pane view was built to avoid. One request carries every visible transcript, so the
+  // cost of watching more agents does not grow with how many are watched.
+
+  const wall = {
+    panes: [],          // locus names, "" for an empty slot. Length is the grid size.
+    cols: 2,
+    links: null,        // cross-agent events, newest last; null until the stream is wired
+    poll: null,
+    paused: false,
+    dragFrom: -1,
+  };
+
+  function wallByName(name) { return locusByName(name); }
+
+  function wallStateOf(name) {
+    if (!name) return "empty";
+    const l = wallByName(name);
+    if (!l) return "gone";
+    return l.running ? "working" : "idle";
+  }
+
+  // Panes are remembered so a reload does not lose the arrangement. localStorage rather than the server: this
+  // is one browser's view of the machine, not a property of the machine, and two tabs may reasonably want
+  // different walls.
+  function wallSave() {
+    try { localStorage.setItem("myriaxon.wall", JSON.stringify({ panes: wall.panes, cols: wall.cols })); }
+    catch (err) { /* private mode, or a full quota: the wall still works, it just does not persist */ }
+  }
+
+  function wallLoad() {
+    try {
+      const saved = JSON.parse(localStorage.getItem("myriaxon.wall") || "null");
+      if (saved && Array.isArray(saved.panes)) {
+        wall.panes = saved.panes.slice(0, 9).map((n) => (typeof n === "string" ? n : ""));
+        wall.cols = [1, 2, 3].includes(saved.cols) ? saved.cols : 2;
+        return;
+      }
+    } catch (err) { /* corrupt entry: fall through to the default */ }
+    wall.panes = [];
+  }
+
+  // The grid is always a full rectangle, because a wall with a ragged edge has no obvious place to drop a pane.
+  function wallEnsureSize() {
+    const needed = wall.cols * wall.cols;
+    while (wall.panes.length < needed) wall.panes.push("");
+    if (wall.panes.length > needed) wall.panes.length = needed;
+  }
+
+  function wallDefaultFill() {
+    // First open: fill the panes with the loci that have something to say, so the room is not empty on arrival.
+    const loci = ((state.config && state.config.loci) || {}).loci || [];
+    const interesting = loci.filter((l) => l.running).concat(loci.filter((l) => !l.running));
+    wall.panes = wall.panes.map((existing, i) => existing || (interesting[i] ? interesting[i].name : ""));
+  }
+
+  function wallRenderRoster() {
+    const host = $("wallroster");
+    if (!host) return;
+    const loci = ((state.config && state.config.loci) || {}).loci || [];
+    host.innerHTML = "";
+    if (!loci.length) {
+      host.innerHTML = `<span class="dim">No loci yet. Create one from the Loci page.</span>`;
+      $("wallrosterhint").textContent = "";
+      return;
+    }
+    const open = wall.panes.filter(Boolean).length;
+    $("wallrosterhint").textContent = `${open} of ${wall.panes.length} panes used`;
+    loci.forEach((locus) => {
+      const chip = document.createElement("div");
+      chip.className = "wall-chip" + (wall.panes.includes(locus.name) ? " on" : "");
+      chip.draggable = true;
+      chip.dataset.locus = locus.name;
+      const state_ = locus.running ? "working" : "idle";
+      chip.innerHTML = `<span class="pane-dot ${state_}"></span><span>${esc(locus.name)}</span>` +
+        `<span class="dim">${locus.open_goals || 0}</span>`;
+      // Drag into a pane, or click to drop it into the first free slot -- a drag is a nice way to arrange,
+      // and a poor way to do the one thing everybody does first.
+      chip.addEventListener("dragstart", (ev) => {
+        wall.dragFrom = -1;
+        ev.dataTransfer.setData("text/plain", "locus:" + locus.name);
+        ev.dataTransfer.effectAllowed = "copy";
+      });
+      chip.addEventListener("click", () => {
+        if (wall.panes.includes(locus.name)) return;
+        const free = wall.panes.indexOf("");
+        if (free === -1) { wallStatus("Every pane is taken. Drag one out, or raise the grid.", "warn"); return; }
+        wall.panes[free] = locus.name;
+        wallSave(); renderWall();
+      });
+      host.appendChild(chip);
+    });
+  }
+
+  function paneTurn(turn, name) {
+    const wrap = document.createElement("div");
+    wrap.className = "pane-turn " + (turn.role === "user" ? "you" : "them");
+    const who = document.createElement("div");
+    who.className = "pane-who";
+    who.textContent = turn.role === "user" ? "you" : name;
+    const bubble = document.createElement("div");
+    bubble.className = "pane-bubble";
+    // textContent, not innerHTML. This is model output and file contents, and building markup from either is
+    // how a transcript becomes a scripting vector.
+    bubble.textContent = turn.text || "";
+    wrap.append(who, bubble);
+    return wrap;
+  }
+
+  function wallLinkLines(name) {
+    // Cross-agent traffic for this pane, from the transparency stream's AGENTS layer. This is the "see their
+    // communication together" half: a locus's own transcript shows what it said to a peer through a tool call
+    // and not what the peer did about it, so the two halves only meet if something joins them.
+    const links = wall.links;
+    if (!links || !wall.linksOn()) return [];
+    return links.filter((e) => e.locus === name || (e.detail && e.detail.member === name));
+  }
+
+  function wallLinksOn() { return $("wall-links") && $("wall-links").checked; }
+
+  function renderWall() {
+    const grid = $("wallgrid");
+    if (!grid) return;
+    wallEnsureSize();
+    grid.dataset.cols = String(wall.cols);
+    grid.innerHTML = "";
+
+    wall.panes.forEach((name, index) => {
+      const pane = document.createElement("div");
+      pane.className = "pane" + (name ? "" : " empty");
+      pane.dataset.index = String(index);
+
+      if (!name) {
+        pane.innerHTML = `<div class="pane-hint">Empty.<br>Drag a locus here from the roster below,<br>
+          or click one to place it.</div>`;
+      } else {
+        const locus = wallByName(name);
+        const stateName = wallStateOf(name);
+        const label = stateName === "working" ? "working" : stateName === "gone" ? "not found" : "idle";
+
+        const bar = document.createElement("div");
+        bar.className = "pane-bar";
+        bar.draggable = true;
+        bar.innerHTML = `<span class="pane-dot ${stateName === "working" ? "working" : stateName === "gone" ? "waiting" : ""}"></span>
+          <span class="pane-name">${esc(name)}</span>
+          <span class="pane-what">${esc(label)}${locus && locus.open_goals ? " · " + locus.open_goals + " open" : ""}</span>
+          <span class="pane-actions">
+            <button class="ghost small" data-act="run" title="Advance its next objective now">Run</button>
+            <button class="ghost small" data-act="close" title="Remove this pane">✕</button>
+          </span>`;
+        bar.addEventListener("dragstart", (ev) => {
+          wall.dragFrom = index;
+          ev.dataTransfer.setData("text/plain", "pane:" + index);
+          ev.dataTransfer.effectAllowed = "move";
+          pane.classList.add("dragging");
+        });
+        bar.addEventListener("dragend", () => pane.classList.remove("dragging"));
+        bar.querySelector('[data-act="close"]').onclick = (ev) => {
+          ev.stopPropagation();
+          wall.panes[index] = "";
+          wallSave(); renderWall();
+        };
+        bar.querySelector('[data-act="run"]').onclick = async (ev) => {
+          ev.stopPropagation();
+          wallStatus(`running ${name}…`);
+          try { await post("/api/loci", { action: "run", locus: name }); wallStatus(`${name}: started`); }
+          catch (err) { wallStatus(`${name}: ${err.message || err}`, "error"); }
+          refreshWallTranscripts();
+        };
+        pane.appendChild(bar);
+
+        const body = document.createElement("div");
+        body.className = "pane-body";
+        body.dataset.paneFor = name;
+        const turns = (state.wallTranscripts || {})[name] || [];
+        if (!turns.length) {
+          body.innerHTML = `<div class="dim" style="font-size:12px">Nothing said yet in this conversation.</div>`;
+        } else {
+          turns.forEach((turn) => body.appendChild(paneTurn(turn, name)));
+        }
+        wallLinkLines(name).forEach((event) => {
+          const link = document.createElement("div");
+          link.className = "pane-link";
+          link.textContent = "⇄ " + (event.summary || "");
+          body.appendChild(link);
+        });
+        pane.appendChild(body);
+
+        const composer = document.createElement("form");
+        composer.className = "pane-composer";
+        const input = document.createElement("textarea");
+        input.rows = 1;
+        input.placeholder = `Message ${name}…`;
+        const send = document.createElement("button");
+        send.className = "primary";
+        send.type = "submit";
+        send.textContent = "Send";
+        composer.append(input, send);
+        composer.addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          const message = input.value.trim();
+          if (!message) return;
+          input.value = "";
+          wallStatus(`sending to ${name}…`);
+          try {
+            const out = await post("/api/loci", { action: "run", locus: name, message });
+            wallStatus(out.accepted ? `${name}: started` : `${name}: ${out.reason || "refused"}`,
+                       out.accepted ? "" : "warn");
+          } catch (err) { wallStatus(`${name}: ${err.message || err}`, "error"); }
+          refreshWallTranscripts();
+        });
+        pane.appendChild(composer);
+      }
+
+      // A drop target says so BEFORE the drop. Without the highlight a drag is a guess, and the guess is
+      // usually wrong in a 3x3 grid where the panes are the same size.
+      pane.addEventListener("dragover", (ev) => { ev.preventDefault(); pane.classList.add("drop-target"); });
+      pane.addEventListener("dragleave", () => pane.classList.remove("drop-target"));
+      pane.addEventListener("drop", (ev) => {
+        ev.preventDefault();
+        pane.classList.remove("drop-target");
+        const payload = ev.dataTransfer.getData("text/plain") || "";
+        if (payload.startsWith("locus:")) {
+          const incoming = payload.slice(6);
+          const existing = wall.panes.indexOf(incoming);
+          if (existing !== -1) wall.panes[existing] = wall.panes[index];   // move, not duplicate
+          wall.panes[index] = incoming;
+        } else if (payload.startsWith("pane:")) {
+          const from = Number(payload.slice(5));
+          // SWAP rather than insert. An insert renumbers every pane after the drop, so the arrangement the
+          // user was looking at changes everywhere except where they dropped -- in a 3x3 grid that reads as
+          // the wall shuffling itself.
+          const held = wall.panes[index];
+          wall.panes[index] = wall.panes[from];
+          wall.panes[from] = held;
+        }
+        wallSave(); renderWall(); refreshWallTranscripts();
+      });
+
+      grid.appendChild(pane);
+    });
+
+    wallRenderRoster();
+    document.querySelectorAll("[data-wall-cols]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(Number(button.dataset.wallCols) === wall.cols));
+    });
+    $("wallhint").textContent = `${wall.panes.filter(Boolean).length} of ${wall.panes.length} panes · ${wall.cols} across`;
+    const busy = wall.panes.filter((n) => wallStateOf(n) === "working").length;
+    setBadge("wallbadge", busy ? String(busy) : "");
+  }
+
+  function wallStatus(text, tone) {
+    const el = $("wallstatus");
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = tone === "error" ? "var(--err)" : tone === "warn" ? "var(--warn)" : "";
+  }
+
+  async function refreshWallTranscripts() {
+    const names = wall.panes.filter(Boolean);
+    if (!names.length) { state.wallTranscripts = {}; renderWall(); return; }
+    try {
+      const data = await get(`/api/loci?transcripts=${encodeURIComponent(names.join(","))}`);
+      if (data && data.loci) state.config.loci = data;
+      state.wallTranscripts = (data && data.transcripts) || {};
+      renderWall();
+      wallSchedule();
+    } catch (err) {
+      wallStatus(`could not read transcripts: ${err.message || err}`, "error");
+    }
+  }
+
+  // One timer for the whole wall, and only while something is actually running. Nine panes each polling would
+  // be nine requests per interval for one screen; this is one. A pane that is idle costs nothing, which is why
+  // the check is on `working` rather than on "the wall is open".
+  function wallSchedule() {
+    if (wall.poll) { clearTimeout(wall.poll); wall.poll = null; }
+    if (wall.paused || !$("wallmodal").classList.contains("open")) return;
+    if (!wall.panes.some((n) => wallStateOf(n) === "working")) return;
+    wall.poll = setTimeout(refreshWallTranscripts, 1500);
+  }
+
+  function wireWallLinks() {
+    // Cross-agent events come from the transparency feed rather than a second mechanism, because that feed is
+    // already the one place every tool call passes through. Filtered to the AGENTS layer: a pane wall exists
+    // to show coordination, and the actions layer would bury it in file reads.
+    if (state.wallLinkWired) return;
+    state.wallLinkWired = true;
+    state.wallLinks = [];
+    const es = new EventSource("/api/transparency/stream");
+    es.onmessage = (ev) => {
+      let payload; try { payload = JSON.parse(ev.data); } catch { return; }
+      if (payload.type === "dial" || payload.layer !== 6) return;
+      state.wallLinks.push(payload);
+      if (state.wallLinks.length > 120) state.wallLinks.shift();
+      wall.links = state.wallLinks;
+      if ($("wallmodal").classList.contains("open") && wallLinksOn()) renderWall();
+    };
+  }
+
+  $("wallbtn").onclick = () => {
+    setMenu(false);
+    $("wallmodal").classList.add("open");
+    wallLoad();
+    wallEnsureSize();
+    wallDefaultFill();
+    wireWallLinks();
+    wall.links = state.wallLinks || [];
+    renderWall();
+    refreshWallTranscripts();
+  };
+  $("wallclose").onclick = () => {
+    if (wall.poll) { clearTimeout(wall.poll); wall.poll = null; }
+    $("wallmodal").classList.remove("open");
+  };
+  $("wallmodal").addEventListener("click", (ev) => {
+    if (ev.target === $("wallmodal")) $("wallclose").click();
+  });
+  $("wallrefresh").onclick = refreshWallTranscripts;
+  $("wallclear").onclick = () => { wall.panes = wall.panes.map(() => ""); wallSave(); renderWall(); };
+  $("wall-live").onclick = () => {
+    wall.paused = !wall.paused;
+    $("wall-live").textContent = wall.paused ? "Resume" : "Pause";
+    wallStatus(wall.paused ? "paused" : "live");
+    if (!wall.paused) refreshWallTranscripts();
+  };
+  $("wall-links").onchange = () => renderWall();
+  document.querySelectorAll("[data-wall-cols]").forEach((button) => {
+    button.onclick = () => {
+      wall.cols = Number(button.dataset.wallCols);
+      // Growing the grid adds empty panes rather than dropping the ones that no longer fit: a pane the user
+      // placed and then lost to a layout change is work thrown away by a control that was meant to be a view.
+      wallEnsureSize();
+      wallSave(); renderWall();
+    };
+  });
+
   $("locuscreate").onclick = createLocus;
   $("locisnew").onclick = () => {
     // Opening the new-locus form also opens the gallery above it. They answer the same question --
@@ -4958,6 +5431,7 @@ function renderSettings() {
   // check, an unmapped entry silently does nothing, which is exactly what shipped once.
   const RAIL_DIALOGS = {
     loci: "locisbtn",
+    wall: "wallbtn",
     code: "codebtn",
     mcp: "mcpbtn",
     plugins: "plugbtn",
