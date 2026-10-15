@@ -13,7 +13,7 @@ set -u
 IMAGE="alexgshaw/regex-log:20251031"
 NAME="myr-smoke"
 REPO=/mnt/c/Users/arian/OneDrive/ドキュメント/Myriaxon
-WHEEL="$REPO/.uv/wheel/myriaxon-1.2.0-py3-none-any.whl"
+WHEEL="$(ls "$REPO"/.uv/wheel/myriaxon_harness-*.whl 2>/dev/null | head -1)"
 
 cleanup() { docker rm -f "$NAME" > /dev/null 2>&1 || true; }
 trap cleanup EXIT

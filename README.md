@@ -46,29 +46,50 @@ python -m myriaxon.bench lint     # validate the IQB-14 task suite (free, no API
 
 Requires **Python 3.10 or newer**. Pick the line that matches what you have.
 
-### Easiest — install the prebuilt wheel
+### From GitHub
 
-If you have the folder this project ships in, `dist/` already contains a built wheel. That is the
-fastest and most predictable route: one file, no build step, all five dependencies resolved by pip.
+The distribution is `myriaxon-harness`; the import package is `myriaxon`. `pip install` normalises the name, so
+either spelling works.
+
+```bash
+pip install "myriaxon-harness[all] @ git+https://github.com/matchu-id/myriaxon-harness.git@v0.0.1"
+```
+
+Or from a clone, which is the route to take if you intend to change anything:
+
+```bash
+git clone https://github.com/matchu-id/myriaxon-harness.git
+cd myriaxon-harness
+pip install ".[all]"
+```
+
+### Easiest — install a prebuilt wheel
+
+If you have the folder this project ships in, `dist/` contains a built wheel. That is the fastest and most
+predictable route: one file, no build step, dependencies resolved by pip.
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install dist\myriaxon-1.2.0-py3-none-any.whl
+pip install (Get-ChildItem dist\myriaxon_harness-*.whl | Select-Object -First 1).FullName
 myriaxon --version
 ```
 
 ```bash
 # macOS / Linux
 python3 -m venv .venv && source .venv/bin/activate
-pip install dist/myriaxon-1.2.0-py3-none-any.whl
+pip install dist/myriaxon_harness-*.whl
 myriaxon --version
 ```
 
-Add `[all]` to the same argument for every provider, MCP and the OS keychain:
+The filename is a glob rather than a literal on purpose. It was written as `myriaxon-1.2.0-...` and broke on
+the first public release, because the distribution gained a `-harness` suffix and the version changed — so
+anyone following the instructions got "no such file" instead of a diagnosis.
+
+Add `[all]` for every provider, MCP and the OS keychain:
 
 ```powershell
-pip install "dist\myriaxon-1.2.0-py3-none-any.whl[all]"
+pip install "dist\myriaxon_harness-0.0.1-py3-none-any.whl[all]"
 ```
 
 > **It is not usable until you add a credential.** `myriaxon --version` working only proves the
@@ -553,6 +574,27 @@ hook for a supervisor (a scheduled task, a container, cron) if you want it genui
 
 ## Permissions and safety
 
+### One gate for every execution path
+
+Myriaxon executes things for a model, so the restriction has to hold on **every** path that runs something —
+not just the one the tool dispatcher guards. `tools.shell_may_run()` is the single answer to *"may a shell run
+here"*, and both `confirm_action` (which `run_bash` goes through) and the Locus condition evaluator ask it.
+
+That shared decision exists because two controls here once held on the path they were written for and not on
+another path doing the same thing: `run_bash` refused a confined shell with no sandbox while a **condition**
+executed freely, and the workspace confinement guarded the file tools while a "private" member directory sat
+inside the tree it trusted. Both were a decision duplicated rather than shared. The audit that found them, with
+the reproductions, is [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md).
+
+| Channel | Bound by |
+|---|---|
+| File tools | `_resolve` — the resolved path must sit inside the Locus workspace, or a granted shared directory |
+| `run_bash` | `shell_may_run` — a confined Locus gets a shell only when a real sandbox is available |
+| Locus conditions | `shell_may_run` — the same question, the same answer |
+| `web_fetch` | `_refuse_reason` — loopback, RFC1918, link-local and metadata hosts are refused |
+| Outbound messaging | a shared secret, compared with `hmac.compare_digest` |
+| MCP / client schemas | never indexed for search — a hostile server cannot seed the catalogue |
+
 ### Modes
 
 | Mode | `write_file` / `edit_file` / `edit_notebook` | `run_bash` |
@@ -931,8 +973,16 @@ python scripts\check_ui_visual.py     # real Chrome via CDP; skip when no browse
 | [docs/PLUGINS.md](docs/PLUGINS.md) | writing a plugin |
 | [docs/MESSAGING.md](docs/MESSAGING.md) | WhatsApp / messaging integration |
 | [docs/VERTEX-SETUP.md](docs/VERTEX-SETUP.md) | Gemini through a corporate Google account (WIF) |
+| [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) | **the security audit**: what was found, how it was proved, and what is still open |
+| [docs/Level4-5-STATUS.md](docs/Level4-5-STATUS.md) | every autonomy requirement with the commit that satisfies it |
+| [docs/PlanToL5.md](docs/PlanToL5.md) | the gap inventory behind that status |
+| [docs/GEMINI-MULTITOOL-STATUS.md](docs/GEMINI-MULTITOOL-STATUS.md) | a known Gemini 3.x limitation, with the measurements |
 | [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) | capability parity vs other harnesses, and the prioritised gap list |
 | [docs/HANDOVER.md](docs/HANDOVER.md) | full state of the project, test inventory and master roadmap |
+
+The audit and status documents are in the repository deliberately. A capability claim with no evidence is a
+wish, and a security claim with no reproduction is worse than none — so both are versioned next to the code
+they describe rather than living in somebody's notes.
 
 ---
 

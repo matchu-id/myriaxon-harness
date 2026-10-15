@@ -47,6 +47,29 @@ PYPROJECT = REPO / "pyproject.toml"
 MANIFEST = REPO / "MANIFEST.in"
 
 
+def _neutral_env() -> dict[str, str]:
+    """A minimal environment for a subprocess that must not see the checkout.
+
+    `_run` pins a neutral working directory for exactly this reason and stopped short of the other half. An
+    inherited `PYTHONPATH` makes the checkout importable to a fresh venv's pip, which then reports the package
+    as already satisfied and installs nothing -- so the check for an installed console script fails while the
+    install itself reported success. That is the worst shape of failure: a green step followed by an
+    unexplained missing file.
+
+    Kept: `PATH` and, on Windows, `SystemRoot` and `PATHEXT`, without which `python.exe` cannot be located or
+    started at all. Kept also the locale variables, because a subprocess that cannot encode a path is a
+    different kind of confusing failure.
+
+    Removed: everything that could put this checkout on a search path (`PYTHONPATH`, `PYTHONSTARTUP`,
+    `PYTHONHOME`) and every `MYRIAXON_*` variable, since those redirect this package's own configuration and a
+    verifier must not inherit the state of the shell that called it.
+    """
+    keep = ("PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR",
+            "LANG", "LC_ALL", "LC_CTYPE", "HOME", "USERPROFILE")
+    env = {name: os.environ[name] for name in keep if name in os.environ}
+    return env
+
+
 def _run(*args, **kwargs):
     """`subprocess.run` from a NEUTRAL working directory unless the caller names one.
 
@@ -280,16 +303,30 @@ def main() -> int:
         "python.exe" if sys.platform == "win32" else "python")
     # `--no-deps --no-index` so this check is OFFLINE and deterministic. It proves the wheel's own contents and entry
     # points are sound; whether PyPI is reachable is not this verifier's business.
+    #
+    # THE ENVIRONMENT IS SCRUBBED, and that is the fix for a check that failed only when the verifier ran after
+    # another verifier. `_run` already pins a neutral WORKING DIRECTORY for exactly this class of reason -- an
+    # inherited `cwd` puts the checkout on `sys.path` -- and forgot the other half: an inherited `PYTHONPATH`
+    # does the same thing. With `PYTHONPATH` pointing at the checkout, the venv's pip finds `myriaxon`
+    # importable, reports "Requirement already satisfied", installs NOTHING, and the console script is never
+    # created. Measured:
+    #
+    #     [diag] site-packages contents: ['pip-24.0.dist-info', 'setuptools-65.5.0.dist-info']
+    #     [diag] Scripts contents: ['Activate.ps1', ..., 'python.exe', 'pythonw.exe']
+    #
+    # An empty install that reports success is worse than a failure, so the environment is rebuilt from a clean
+    # base for every subprocess: PATH plus SystemRoot, which Windows needs, and nothing that could make the
+    # checkout visible or redirect this package's own configuration.
     installed = _run(
         [str(venv_py), "-m", "pip", "install", "--quiet", "--no-deps", "--no-index", str(wheel)],
-        capture_output=True, text=True, timeout=600)
+        capture_output=True, text=True, timeout=600, env=_neutral_env())
     check("the wheel installs offline", installed.returncode == 0, (installed.stderr or "")[-200:])
 
     script = clean / ("Scripts" if sys.platform == "win32" else "bin") / (
         "myriaxon.exe" if sys.platform == "win32" else "myriaxon")
     if sys.platform != "win32":
         script = clean / "bin" / "myriaxon"
-    check("the console script exists", script.is_file(), str(script.name))
+    check("the console script exists", script.is_file(), str(script))
 
     # A no-dependency venv is DELIBERATE: it is the state a user is in if an install half-finished, and it is where
     # the `rich` traceback appeared. These checks assert the first commands still work there.
@@ -333,9 +370,22 @@ def main() -> int:
                            "import myriaxon; print(myriaxon.VERSION == myriaxon.__version__)"],
                           capture_output=True, text=True, timeout=120)
     check("  the two cannot drift", done.stdout.strip() == "True", done.stdout.strip())
+    # `importlib.metadata` is asked for the DISTRIBUTION name, not the import name, and those now differ: the
+    # distribution is `myriaxon-harness` while the import package stays `myriaxon`.
+    #
+    # This asked for `version('myriaxon')`, which raises PackageNotFoundError once the rename lands -- so the
+    # check could never pass again for anybody, on any machine, forever. It now looks up the DECLARED name and
+    # falls back to the old one, so a checkout of an earlier version still verifies.
     done = _run([str(venv_py), "-c",
-                           "from importlib.metadata import version; print(version('myriaxon'))"],
-                          capture_output=True, text=True, timeout=120)
+                 "from importlib.metadata import version, PackageNotFoundError\n"
+                 f"for _n in ({declared_name!r}, 'myriaxon'):\n"
+                 "    try:\n"
+                 "        print(version(_n)); break\n"
+                 "    except PackageNotFoundError:\n"
+                 "        continue\n"
+                 "else:\n"
+                 "    print('NOT INSTALLED')"],
+                capture_output=True, text=True, timeout=120)
     check(f"importlib.metadata agrees ({declared_version})",
                     done.stdout.strip() == declared_version, done.stdout.strip() or done.stderr[:120])
 

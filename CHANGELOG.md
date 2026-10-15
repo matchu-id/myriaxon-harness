@@ -2,6 +2,106 @@
 
 All notable changes to Myriaxon. This project follows [Semantic Versioning](https://semver.org/).
 
+## [0.0.1] — 2026-10-15
+
+The first public release, published as `myriaxon-harness`. Everything below happened on the way to it, and the
+entries are grouped by what a reader is likely to be looking for rather than by the order they were done.
+
+### Security
+
+An audit of what a **model** can reach — rather than of which dangerous function names appear in the source —
+found four issues. Three are fixed here; the fourth is documented with its measurements.
+
+- **`web_fetch` reached any host, including loopback.** It validated the scheme and nothing else. Proved against
+  a loopback-only listener, which it read the body of. That matters twice over: a model could talk to services
+  deliberately bound to localhost, and it defeated the confinement story for a sandboxed agent, because
+  `run_bash` is refused outright when no sandbox is available *precisely so* a shell cannot reach past its
+  workspace. Loopback, RFC1918, link-local, unique-local IPv6, metadata hostnames and non-HTTP schemes are now
+  refused, checked on the resolved address as well as the literal one. `MYRIAXON_ALLOW_PRIVATE_FETCH=1` opts out.
+- **A Locus condition could run a shell with no sandbox and no approval.** `conditions.py` contained no
+  reference to the sandbox, the confinement boundary or `confirm_action`, and a model can define a condition
+  through `locus_create`. Verified by writing a marker file, while the identical string through `run_bash` was
+  refused. Command conditions now ask the same gate `run_bash` asks.
+- **The webhook compared its shared secret with `!=`**, which leaks the secret's prefix through response
+  timing. Now `hmac.compare_digest`.
+- **A Locus could read every peer's workspace.** The run loop granted the *parent* of every member's workspace,
+  and `member_workspace()` returned a path inside the granted tree while documenting itself as private. The
+  tests missed it because they granted a narrower set than production.
+- A corporate Google Cloud project id was hardcoded in 13 files. It was also a functional defect: every user
+  outside that organisation would have had each Vertex request sent to a project they cannot read.
+
+### Added — coordination
+
+Level 4 of the autonomy model is "coordinates with other agents", and until now every Locus was mutually
+invisible by design: three could hold the same objective and never know.
+
+- **A swarm board.** A filesystem coordination primitive — `board/`, `shared/`, `members/` — where two members
+  cannot both claim a task (settled by an exclusive create, not by read-then-write), a dead member's lease
+  expires so it cannot block the board forever, and completion is recorded only once the result is readable.
+- **Collective memory with provenance.** A finding by one member, retrievable by every member, with the author
+  attached — because a finding with no author cannot be questioned. Unattributed entries are refused at the
+  boundary. Retraction is recorded rather than deleted, so a peer that relied on an entry can find out.
+- **Consensus, with disagreement escalated rather than resolved.** N independent attempts; a split never yields
+  an answer, and the escalation names both sides and says a person must decide. Independence is enforced by the
+  interface, not by a convention.
+- **Conflict detection on shared artifacts.** A digest check catches the lost-update case; advisory intents let
+  a member choose a different file. It detects and never blocks, because a lock held by a member that dies is a
+  lock nobody releases.
+- **Per-member mount enforcement** as an explicit allowlist, so the board is reachable without exposing
+  `sessions/`, `audit.jsonl` or every peer's workspace.
+
+### Added — self-direction
+
+- **Goal decomposition** with a depth cap that flattens rather than raising, because unbounded decomposition is
+  a fork bomb with a token budget.
+- **Value ordering**, recorded on the goal so the agent's judgement about what matters is reviewable. It will
+  sometimes value what is easiest, and a stored number is what makes that visible.
+- **Retirement of the agent's own obsolete objectives** — a terminal state with a reason, never a deletion, and
+  it refuses anything the owner wrote.
+- **Re-planning after a failed step.** Two failures produce "STOP AND RE-PLAN … abandoning an objective with a
+  clear reason is a good outcome". Before this, a failed step left no trace in the next prompt.
+- **A context budget the agent can read**, and `spill`, which moves a large result to disk and keeps a pointer —
+  relocating rather than losing.
+- **Memory curation** that sweeps by use rather than by age, dry-run by default, and never touches an entry the
+  owner wrote.
+- **Declared uncertainty**: `checked`, `inferred`, `assumed`, with `checked` and `inferred` required to name
+  their evidence so the label stays meaningful. The harness cannot make a model feel doubt, and the module says
+  so.
+
+### Added — resilience
+
+- **A failure circuit breaker** that stops at two failures rather than ten, and an answer-first rule so a
+  question gets an answer instead of an investigation.
+- **A dead-letter store** where repeats become visible: one failure is noise, three in a day is a defect, and
+  that distinction needs arithmetic across records that no log line provides.
+- **A repetition detector** for a run that has stopped saying anything new. Its threshold was measured, not
+  chosen: Jaccard scored a realistic restatement at 57% against a threshold needing 82%, so it would have
+  missed its own motivating case.
+
+### Fixed
+
+- **`netra` chat completions sent an empty body.** `_Client.post` took `content` and `_complete_chat` passed
+  `json_body`, which fell into `**kwargs`. The second bug of exactly that shape in that file.
+- **`--vendor gemini` was rejected** by the code path that handles `--vendor`, so the documented way to select
+  Gemini on the command line could never have worked.
+- **`GOOGLE_CLOUD_PROJECT` was ignored**, so the documented Vertex setup produced `projects//locations/...`.
+- **A stale ordering flake** in the test suite, which turned out to be a defect in the test: it asserted on
+  pytest's capture plumbing rather than on the product. Four hypotheses were disproved by measurement and are
+  recorded so nobody repeats them.
+- **Three verifiers** that would have failed on every future release — two demanded a package name and four
+  version literals that the rename invalidated, and one required an import guard from a module with no optional
+  imports.
+
+### Known limitations
+
+- **Gemini 3.x multi-tool turns can fail on the second turn.** Vertex returns a `thought_signature` on some
+  turns and not others; a turn that arrives unsigned cannot be replayed, and the run dies mid-objective. The
+  payload was captured from a real run and the cause pinned to Vertex rather than to reassembly. The fix is a
+  policy — do not replay an unsigned call — and it is **not implemented**. See
+  [docs/GEMINI-MULTITOOL-STATUS.md](docs/GEMINI-MULTITOOL-STATUS.md).
+- **Declared uncertainty cannot be closed.** A harness can record the distinction between what was checked and
+  what was assumed; it cannot make a model feel doubt.
+
 ## [1.2.0] — 2026-10-01
 
 Mission control: the dashboard becomes an operations surface rather than a chat window with a

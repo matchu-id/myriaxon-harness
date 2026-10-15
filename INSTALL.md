@@ -110,18 +110,18 @@ install it directly. It is a single file with no build step, which makes it the 
 predictable route:
 
 ```bash
-python -m pip install myriaxon-1.2.0-py3-none-any.whl
+python -m pip install myriaxon_harness-*.whl
 ```
 
 Add the extras in the same command if you want them:
 
 ```bash
-python -m pip install "myriaxon-1.2.0-py3-none-any.whl[all]"
+python -m pip install "myriaxon_harness-*.whl[all]"
 ```
 
 ### The `.tar.gz` alone: possible, with one real caveat
 
-`python -m pip install myriaxon-1.2.0.tar.gz` works, but **a source distribution needs a build
+`python -m pip install myriaxon_harness-*.tar.gz` works, but **a source distribution needs a build
 backend, and `pip` fetches one over the network even when `setuptools` is already installed.** That
 is standard PEP 517 behaviour, not a defect in this package, but it is surprising enough to state
 plainly:
@@ -133,7 +133,7 @@ plainly:
 | Needs a build backend | no | yes |
 | Size | 824 KB | 878 KB |
 
-Measured on a clean virtualenv: a bare `pip install myriaxon-1.2.0.tar.gz --no-index` exits 1 with
+Measured on a clean virtualenv: a bare `pip install myriaxon_harness-*.tar.gz --no-index` exits 1 with
 `Installing build dependencies: finished with status 'error'`. The same venv installs the wheel with
 `--no-index` and no build step at all.
 
@@ -141,13 +141,13 @@ Measured on a clean virtualenv: a bare `pip install myriaxon-1.2.0.tar.gz --no-i
 
 ```bash
 # 1. Use the backend already on the machine. Needs setuptools>=77 in the ACTIVE environment.
-python -m pip install --no-build-isolation myriaxon-1.2.0.tar.gz
+python -m pip install --no-build-isolation myriaxon_harness-*.tar.gz
 
 # 2. Unpack it and build in place -- what the project's own verifiers do, and it needs nothing
 #    beyond a setuptools that is already present.
-tar -xzf myriaxon-1.2.0.tar.gz && cd myriaxon-1.2.0
+tar -xzf myriaxon_harness-*.tar.gz && cd myriaxon_harness-*
 python -c "from setuptools import build_meta as bm; print(bm.build_wheel('../dist'))"
-python -m pip install ../dist/myriaxon-1.2.0-py3-none-any.whl
+python -m pip install ../dist/myriaxon_harness-*.whl
 ```
 
 `--no-build-isolation` with an older setuptools fails with
