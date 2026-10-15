@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Myriaxon Harness"
+abstract: >-
+  An agentic harness for the terminal and the browser: persistent agents (Loci), a filesystem coordination board
+  for multi-agent work, an eight-layer transparency dial, and a security model with one execution gate for every
+  path that runs a shell.
+type: software
+authors:
+  - family-names: Khalfani
+    given-names: Thariq Arian
+    email: ariankhalfani@gmail.com
+contact:
+  - family-names: Khalfani
+    given-names: Thariq Arian
+    email: ariankhalfani@gmail.com
+license: MIT
+repository-code: "https://github.com/matchu-id/myriaxon-harness"
+url: "https://github.com/matchu-id/myriaxon-harness"
+keywords:
+  - agent
+  - agentic
+  - harness
+  - llm
+  - coding-agent
+  - cli
+  - mcp
+  - multi-agent
+version: 0.0.1
+date-released: "2026-10-15"

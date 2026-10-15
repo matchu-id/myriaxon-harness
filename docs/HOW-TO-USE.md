@@ -292,11 +292,21 @@ boundary** — its own docstring says so.
 ### Checking your own copy
 
 ```bash
-python tools/run_checks.py          # all verifiers plus the test suite
-python tools/bench_l4_l5.py         # the functional autonomy bench, with evidence per line
+python tools/run_checks.py               # all verifiers plus the test suite
+python tools/bench_l4_l5.py              # the functional autonomy bench, with evidence per line
+python tools/verify_binary_identity.py   # is the installed launcher genuine?
+python tools/browser/wall_check.py       # drive the dashboard in real Chrome and check it
 ```
 
-Both run offline and cost nothing.
+All run offline and cost nothing. The browser checks need Chrome and node, and **skip** rather than fail if
+either is missing.
+
+### If an antivirus flags `myriaxon.exe`
+
+Read **[FALSE-POSITIVE.md](FALSE-POSITIVE.md)**. The short version: pip generates that file, this repository
+commits no executables, and it is unsigned with no version information Windows can read — which is genuinely
+what malware looks like, and is why it can be flagged. The document has the two PowerShell commands that settle
+it, and `tools/verify_binary_identity.py` prints the same thing with the numbers a vendor report needs.
 
 ### Known limitations, stated rather than discovered by you
 

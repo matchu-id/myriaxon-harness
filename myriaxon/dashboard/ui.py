@@ -717,6 +717,17 @@ INDEX_HTML = r"""<!DOCTYPE html>
   }
 
   .wall-foot { margin-top: 10px; flex: none; }
+
+  /* The failure report. Deliberately loud: it uses the error colour and says outright that this is a bug,
+     because the alternative reading -- "the room is empty" -- sends the reader looking at their own setup. */
+  .wall-errors {
+    margin-top: 10px; padding: 8px 10px; border-radius: 8px; flex: none;
+    border: 1px solid var(--err); background: color-mix(in srgb, var(--err) 12%, transparent);
+    font-size: 12px;
+  }
+  .wall-error-head { color: var(--err); font-weight: 600; margin-bottom: 4px; }
+  .wall-error-row { font-family: var(--mono, monospace); font-size: 11px; color: var(--text-2);
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wall-roster .wall-roster-list { display: flex; flex-wrap: wrap; gap: 6px; }
   .wall-chip {
     display: flex; align-items: center; gap: 6px; padding: 4px 8px; cursor: grab;
@@ -2060,6 +2071,11 @@ def register(api):
     </div>
 
     <div class="wall-grid" id="wallgrid" data-cols="2"></div>
+
+    <!-- Sits directly under the grid and is hidden until something actually fails. Above the roster rather
+         than at the bottom of the dialog, because a message about the thing you are looking at has to be
+         where you are looking. -->
+    <div class="wall-errors" id="wall-errors" role="alert" hidden></div>
 
     <div class="wall-foot">
       <div class="fieldset wall-roster">
@@ -4917,13 +4933,93 @@ function renderSettings() {
     // communication together" half: a locus's own transcript shows what it said to a peer through a tool call
     // and not what the peer did about it, so the two halves only meet if something joins them.
     const links = wall.links;
-    if (!links || !wall.linksOn()) return [];
+    if (!links || !wallLinksOn()) return [];
     return links.filter((e) => e.locus === name || (e.detail && e.detail.member === name));
   }
 
   function wallLinksOn() { return $("wall-links") && $("wall-links").checked; }
 
+  // ONE path for an incoming cross-agent event: the live stream calls it, and so does the diagnostic hook.
+  // Two paths would mean the check exercised something the product does not run.
+  function pushAgentEvent(payload) {
+    if (!state.wallLinks) state.wallLinks = [];
+    state.wallLinks.push(payload);
+    if (state.wallLinks.length > 120) state.wallLinks.shift();
+    wall.links = state.wallLinks;
+    if ($("wallmodal").classList.contains("open") && wallLinksOn()) renderWall();
+    return state.wallLinks.length;
+  }
+
+  // ------------------------------------------------------------------ saying when something is wrong
+  //
+  // WHY THIS EXISTS, and it is not defensive habit. A wall pane threw `TypeError: wall.linksOn is not a
+  // function` inside `renderWall`'s own loop, so the panes were never appended: the room opened, looked
+  // empty, and said nothing. The only account of it was an exception in the browser console, which the
+  // person using the dashboard does not have open. A feature that fails silently is worse than one that
+  // fails loudly, because the reader concludes the FEATURE is empty rather than BROKEN, and goes looking
+  // for the problem in their own setup.
+  //
+  // So every panel here reports its own failures into the page. The role="alert" is deliberate: a screen
+  // reader should hear this too, and a diagnostic only sighted users receive is half a diagnostic.
+
+  function wallFail(what, err) {
+    const detail = String((err && (err.stack || err.message)) || err || "unknown error");
+    state.wallErrors = state.wallErrors || [];
+    // Deduplicated by message: a per-pane failure in a 3x3 grid would otherwise print nine identical lines
+    // and bury the one fact that matters.
+    if (!state.wallErrors.some((e) => e.message === detail)) {
+      state.wallErrors.push({ what, message: detail, at: Date.now() });
+    }
+    const host = $("wall-errors");
+    if (host) {
+      host.hidden = false;
+      host.innerHTML = "";
+      const head = document.createElement("div");
+      head.className = "wall-error-head";
+      head.textContent = `${state.wallErrors.length} problem(s) in the wall — this is a bug, not an empty room`;
+      host.appendChild(head);
+      state.wallErrors.slice(-4).forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "wall-error-row";
+        // textContent: this is an exception message, and exception messages can contain anything at all --
+        // including text read from a file that a tool just touched.
+        row.textContent = `${entry.what}: ${entry.message.split("\n")[0]}`;
+        row.title = entry.message;
+        host.appendChild(row);
+      });
+    }
+    if (typeof addNotice === "function") addNotice(`${what} failed — see the wall for the error`, "error");
+    // Still to the console, because a developer with it open wants the stack.
+    console.error(`[wall] ${what}`, err);
+  }
+
+  function wallClearErrors() {
+    state.wallErrors = [];
+    const host = $("wall-errors");
+    if (host) { host.hidden = true; host.innerHTML = ""; }
+  }
+
+  // Runs `fn`, and on a throw reports it on the page instead of letting it vanish. Used for the render path
+  // and for every async action, because those are the two places a silent failure hides.
+  function wallGuard(what, fn) {
+    try {
+      return fn();
+    } catch (err) {
+      wallFail(what, err);
+      return undefined;
+    }
+  }
+
   function renderWall() {
+    const grid = $("wallgrid");
+    if (!grid) return;
+    // WRAPPED, so a bug in here is visible on the page. This is not hypothetical: a bad call inside this
+    // function's loop meant the panes were never appended, and the wall opened empty and silent -- the
+    // reader could only conclude the feature did nothing.
+    return wallGuard("rendering the panes", () => renderWallInner());
+  }
+
+  function renderWallInner() {
     const grid = $("wallgrid");
     if (!grid) return;
     wallEnsureSize();
@@ -5068,9 +5164,13 @@ function renderSettings() {
       const data = await get(`/api/loci?transcripts=${encodeURIComponent(names.join(","))}`);
       if (data && data.loci) state.config.loci = data;
       state.wallTranscripts = (data && data.transcripts) || {};
+      // A successful read clears the failure report: leaving a stale error on screen after the cause is gone
+      // teaches the reader to ignore the box, which is exactly what it must not become.
+      wallClearErrors();
       renderWall();
       wallSchedule();
     } catch (err) {
+      wallFail("reading the conversations", err);
       wallStatus(`could not read transcripts: ${err.message || err}`, "error");
     }
   }
@@ -5096,23 +5196,22 @@ function renderSettings() {
     es.onmessage = (ev) => {
       let payload; try { payload = JSON.parse(ev.data); } catch { return; }
       if (payload.type === "dial" || payload.layer !== 6) return;
-      state.wallLinks.push(payload);
-      if (state.wallLinks.length > 120) state.wallLinks.shift();
-      wall.links = state.wallLinks;
-      if ($("wallmodal").classList.contains("open") && wallLinksOn()) renderWall();
+      pushAgentEvent(payload);
     };
   }
 
   $("wallbtn").onclick = () => {
     setMenu(false);
     $("wallmodal").classList.add("open");
-    wallLoad();
-    wallEnsureSize();
-    wallDefaultFill();
-    wireWallLinks();
-    wall.links = state.wallLinks || [];
-    renderWall();
-    refreshWallTranscripts();
+    wallGuard("opening the wall", () => {
+      wallLoad();
+      wallEnsureSize();
+      wallDefaultFill();
+      wireWallLinks();
+      wall.links = state.wallLinks || [];
+      renderWall();
+      refreshWallTranscripts();
+    });
   };
   $("wallclose").onclick = () => {
     if (wall.poll) { clearTimeout(wall.poll); wall.poll = null; }
@@ -5138,6 +5237,39 @@ function renderSettings() {
       wallEnsureSize();
       wallSave(); renderWall();
     };
+  });
+
+  // ---- diagnostics ------------------------------------------------------------------------------
+  //
+  // The wall's internals are exposed on `window` for one reason: so it can be DRIVEN and checked by a real
+  // browser, rather than validated by reading its markup. That distinction is not academic here -- the first
+  // version of this room shipped a call to a function that did not exist, and every static check passed while
+  // the room rendered nothing at all.
+  //
+  // A test hook is also a debugging hook: `myriaxonWall.panes` and `.errors` in a console answer "why is it
+  // empty" without a rebuild.
+  window.myriaxonWall = {
+    state: wall,
+    render: () => renderWall(),
+    refresh: () => refreshWallTranscripts(),
+    errors: () => (state.wallErrors || []).slice(),
+    setPanes: (names) => { wall.panes = names.slice(0, 9); wallEnsureSize(); wallSave(); renderWall(); },
+    linksOn: () => wallLinksOn(),
+    // Feeds one event through the SAME path the live stream uses, so a check exercises the real filter rather
+    // than a re-implementation of it. A hook that bypassed the filter would prove nothing about the filter.
+    pushEvent: (event) => pushAgentEvent(event),
+    // The filter's own decision, exposed so a check can assert WHY a line did or did not render.
+    isAgentEvent: (event) => !!event && event.layer === 6,
+  };
+
+  // A GLOBAL TRAP, so an exception thrown from anywhere the user can reach lands on the page and not only in
+  // a console they do not have open. `error` covers synchronous throws and resource failures;
+  // `unhandledrejection` covers a rejected promise, which is how most async UI work fails.
+  window.addEventListener("error", (event) => {
+    if (event && event.message) wallFail("uncaught error", event.error || event.message);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    wallFail("unhandled promise rejection", (event && event.reason) || "no reason given");
   });
 
   $("locuscreate").onclick = createLocus;

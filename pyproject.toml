@@ -35,7 +35,8 @@ license = "MIT"
 # The licence TEXT still ships -- as a file, which is where a reader looks for it, and which setuptools records in
 # `dist-info/licenses/`. Verified present in the built wheel rather than assumed.
 license-files = ["LICENSE"]
-authors = [{ name = "Thariq Arian Khalfani", email = "ai.ariankhalfani@gmail.com" }]
+authors = [{ name = "Thariq Arian Khalfani", email = "ariankhalfani@gmail.com" }]
+maintainers = [{ name = "Thariq Arian Khalfani", email = "ariankhalfani@gmail.com" }]
 keywords = ["agent", "agentic", "harness", "llm", "coding-agent", "cli", "mcp", "anthropic", "gemini"]
 # `License :: OSI Approved :: MIT License` is deliberately ABSENT.
 #
