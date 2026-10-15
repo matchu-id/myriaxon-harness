@@ -27,6 +27,7 @@ Two honesty rules, both load-bearing:
 from __future__ import annotations
 
 import html as _html
+import os
 import re
 import urllib.parse
 
@@ -43,7 +44,11 @@ USER_AGENT = (
 # inspect for one; the contact string is what an API that publishes a policy asks for, and pretending
 # to be a browser while ignoring that policy is how a tool gets an IP blocked.
 BROWSER_USER_AGENT = USER_AGENT
-POLITE_USER_AGENT = "Myriaxon/1.0 (+https://github.com/Ariankhalfani/myriaxon)"
+POLITE_USER_AGENT = "Myriaxon/1.0 (+https://github.com/matchu-id/myriaxon-harness)"
+
+# Set MYRIAXON_ALLOW_PRIVATE_FETCH=1 to fetch loopback and private addresses on purpose. Read at call time
+# rather than at import, so a test can flip it without reloading the module.
+_ALLOW_PRIVATE: dict[str, bool] = {"value": os.environ.get("MYRIAXON_ALLOW_PRIVATE_FETCH", "").strip() == "1"}
 
 REQUEST_TIMEOUT = 25.0
 MAX_FETCH_CHARS = 40_000
@@ -266,6 +271,81 @@ def _page_title(document: str) -> str:
     return _html.unescape(match.group(1)).strip() if match else ""
 
 
+def _refuse_reason(target: str) -> str:
+    """Why this URL must not be fetched, or "" when it is fine.
+
+    MEASURED HOLE. `web_fetch` had no host check at all -- only a scheme check -- so it reached anything the
+    machine could route to. Verified against a loopback-only listener started by the audit:
+
+        web_fetch("http://127.0.0.1:<port>/")   ->  error=False, returned the service's body
+
+    That matters twice over. A model can use it to talk to services deliberately bound to loopback (the
+    dashboard, a local admin port, another agent's control endpoint), and it defeats the confinement story for
+    a sandboxed Locus: `run_bash` is refused outright when no sandbox is available *precisely so* a shell
+    cannot reach past the workspace, and a fetch that reaches loopback is the same reach through another door.
+
+    The classic target is the cloud metadata endpoint, which on a cloud VM hands out credentials to anything
+    that asks. It was unreachable from this machine (no route), which is luck rather than a control.
+
+    Blocked: loopback, RFC1918 private ranges, link-local (which includes 169.254.169.254), unique-local IPv6,
+    and the well-known metadata hostnames. Nothing here is a security boundary on its own -- a hostile DNS
+    server can resolve a public name to a private address, which is why the check runs on the RESOLVED address
+    as well as the literal one.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(target)
+    if parsed.scheme not in ("http", "https"):
+        return f"only http and https are fetched, not {parsed.scheme or 'that scheme'}"
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        return "the URL has no host"
+
+    if _ALLOW_PRIVATE.get("value"):
+        return ""  # an explicit opt-in, for someone reading a page on their own network on purpose
+
+    metadata_names = ("metadata.google.internal", "metadata.goog", "instance-data")
+    if host in metadata_names or host.endswith(".internal"):
+        return (f"{host} is a cloud metadata or internal hostname; it is how a VM hands out its own "
+                "credentials, so it is not fetchable")
+
+    import ipaddress
+
+    try:
+        addresses = [ipaddress.ip_address(host)]
+    except ValueError:
+        # A NAME, not an address. Resolve it, because a public name can point at a private address.
+        import socket
+
+        try:
+            infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80),
+                                       proto=socket.IPPROTO_TCP)
+            addresses = []
+            for info in infos:
+                try:
+                    addresses.append(ipaddress.ip_address(info[4][0]))
+                except ValueError:
+                    continue
+        except OSError as exc:
+            return f"{host} could not be resolved ({exc.__class__.__name__})"
+
+    for address in addresses:
+        if address.is_loopback:
+            return f"{host} resolves to a loopback address ({address}); local services are not fetchable"
+        if address.is_link_local:
+            return (f"{host} resolves to a link-local address ({address}) -- this is the range cloud "
+                    "metadata services live in")
+        if address.is_private:
+            return f"{host} resolves to a private address ({address}); this machine's own network is not fetchable"
+        if address.is_reserved or address.is_multicast or address.is_unspecified:
+            return f"{host} resolves to a reserved address ({address})"
+        # IPv4-mapped IPv6, e.g. ::ffff:127.0.0.1, which is loopback wearing a different coat.
+        mapped = getattr(address, "ipv4_mapped", None)
+        if mapped is not None and (mapped.is_loopback or mapped.is_private or mapped.is_link_local):
+            return f"{host} resolves to a mapped private address ({mapped})"
+    return ""
+
+
 def web_fetch(url: str, max_chars: int = MAX_FETCH_CHARS) -> tuple[str, bool]:
     """Fetch a URL and return readable text. Returns (text, is_error)."""
     target = str(url or "").strip()
@@ -273,6 +353,17 @@ def web_fetch(url: str, max_chars: int = MAX_FETCH_CHARS) -> tuple[str, bool]:
         return "web_fetch needs a url", True
     if not target.lower().startswith(("http://", "https://")):
         target = "https://" + target
+
+    refusal = _refuse_reason(target)
+    if refusal:
+        return (
+            f"web_fetch will not fetch {target}: {refusal}.\n"
+            "This is a deliberate restriction, not a failure -- a page fetch reaches every service this "
+            "machine can route to, including ones bound to localhost only, so local and private addresses are "
+            "refused. Fetching a public page is unaffected. If you genuinely need a local address, say so and "
+            "the owner can allow it with MYRIAXON_ALLOW_PRIVATE_FETCH=1.",
+            True,
+        )
 
     try:
         with _client() as client:

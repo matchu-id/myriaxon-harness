@@ -14,6 +14,7 @@ Design notes:
 """
 from __future__ import annotations
 
+import hmac
 import json
 import mimetypes
 import os
@@ -53,6 +54,28 @@ from . import commands as commands_mod
 # be 12 MB while the terminal allowed 32 MB, so a 20 MB file was accepted in one front end and
 # refused with a 413 in the other, and the comment claimed they matched.
 MAX_UPLOAD_BYTES = ATTACHMENT_SIZE_CAP_BYTES
+
+
+def _secret_matches(supplied: str, expected: str) -> bool:
+    """Whether a supplied shared secret matches, in CONSTANT TIME.
+
+    The check was `supplied != config.secret`, which compares byte by byte and returns as soon as two differ.
+    That leaks the secret's PREFIX through response timing: an attacker who can measure the round trip learns
+    how many leading characters were right, and recovers the value one character at a time instead of guessing
+    the whole thing.
+
+    Whether this endpoint is network-reachable decides how much that matters, and the honest position is that
+    it should not depend on that: the webhook is the one path designed to accept a request from outside, the
+    comparison costs nothing to make safe, and `hmac.compare_digest` is the standard tool for it.
+
+    Both sides are encoded to bytes first, because `compare_digest` refuses `str` containing non-ASCII and
+    would otherwise raise inside a request handler -- turning a rejected secret into a 500.
+    """
+    try:
+        return hmac.compare_digest(str(supplied or "").encode("utf-8"),
+                                   str(expected or "").encode("utf-8"))
+    except (TypeError, ValueError):
+        return False
 
 
 class DashboardApp:
@@ -210,7 +233,7 @@ class DashboardApp:
                     or headers.get("x-ioh-secret")
                     or ""
                 )
-            if supplied != config.secret:
+            if not _secret_matches(supplied, config.secret):
                 return {"ok": False, "reason": "bad or missing shared secret"}
 
         try:

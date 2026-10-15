@@ -44,6 +44,7 @@ unbounded loop. This is the same shape as the workflow cap vocabulary in the ref
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -93,6 +94,16 @@ SHELL_BUILTINS = frozenset({
     "set", "shift", "shopt", "source", "suspend", "test", "then", "time", "times", "trap", "true", "type",
     "typeset", "ulimit", "umask", "unalias", "unset", "until", "wait", "while", "[", "]", ".",
 })
+
+
+def _shell_conditions_allowed() -> bool:
+    """Whether command conditions may run a shell. Read per call, so a test can flip it.
+
+    Off unless `MYRIAXON_CONDITIONS_ALLOW_SHELL=1`. See the refusal in `_evaluate_command` for why the default
+    is refusal rather than a warning: a command condition is a shell command that runs unattended on every
+    tick, with no sandbox and nobody to approve it, and a model can create one.
+    """
+    return os.environ.get("MYRIAXON_CONDITIONS_ALLOW_SHELL", "").strip() == "1"
 
 
 def unresolvable_program(command: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> str:
@@ -439,6 +450,38 @@ class Condition:
         missing = unresolvable_program(self.command)
         if missing:
             return ConditionResult(holds=True, error=True, detail=f"{self.description}: {missing}")
+
+        # AN UNSANDBOXED SHELL WITH NO APPROVAL GATE, REFUSED BY DEFAULT.
+        #
+        # MEASURED HOLE. A model can define a condition through `locus_create`, and this ran it with
+        # `shell=True` -- with no sandbox, no confinement boundary and no `confirm_action` anywhere in this
+        # module. Verified: a condition whose command was `echo pwned > <path>` executed and wrote the file,
+        # while the SAME string through `run_bash` was refused with "a shell command cannot be confined to
+        # this Locus's workspace, and no sandbox is available to isolate it".
+        #
+        # So the approval gate and the confinement check were both bypassable by writing the command into a
+        # condition instead of calling the tool. That is the wrong shape for a control: the restriction has to
+        # hold on every path that executes something, or it is a suggestion.
+        #
+        # It was not hypothetical. A user can reasonably ask an agent to "watch whether the build server is
+        # still up", the model writes a `command` condition, and a string a user would never approve as a shell
+        # command runs on every tick, unattended.
+        #
+        # The default is now refusal, and the refusal is REPORTED rather than silent -- a monitor that quietly
+        # stopped working would be a worse outcome than one that says it needs permission. An operator who
+        # wants command conditions sets MYRIAXON_CONDITIONS_ALLOW_SHELL=1 and accepts that they run with this
+        # process's full rights.
+        if not _shell_conditions_allowed():
+            return ConditionResult(
+                holds=True,
+                error=True,
+                detail=(
+                    f"{self.description}: this is a command condition and command conditions are refused by "
+                    "default, because they run a shell with no sandbox and nobody to approve them. Set "
+                    "MYRIAXON_CONDITIONS_ALLOW_SHELL=1 to allow them, or use a condition kind that inspects "
+                    "files instead of running a command."
+                ),
+            )
 
         try:
             completed = subprocess.run(
