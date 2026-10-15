@@ -1202,7 +1202,7 @@ def execute_locus_run(tool_input: dict, ctx: ToolContext) -> tuple[str, bool]:
             previous_workspace = getattr(ctx, "locus_workspace", "")
             ctx.locus_workspace = workspace
             boundary_token = tools.confine_to(workspace)
-            # Level 4.12: grant the SWARM directories, and nothing else.
+            # Level 4.12: grant the BOARD, and nothing else.
             #
             # Measured before this: the board lives under the config dir, which is outside every member's
             # workspace, so `_resolve` refused it and a confined Locus could not use the board at all. The
@@ -1210,13 +1210,25 @@ def execute_locus_run(tool_input: dict, ctx: ToolContext) -> tuple[str, bool]:
             # `sessions/`, `audit.jsonl`, `config.json` and every PEER workspace, while mounting the board
             # inside each workspace would give each member a private copy and share nothing.
             #
-            # Granted as explicit named directories rather than by widening, so the entire set of exceptions
-            # is visible in one place and can be refused.
+            # A PEER-WORKSPACE GRANT WAS HERE AND IT WAS A HOLE. The line read
+            #
+            #     tools.grant_shared("member-workspaces", _swarm_mod.members_dir())
+            #
+            # and `members_dir()` is the PARENT of every member's own workspace -- so granting it handed each
+            # confined Locus read and write access to all of its peers' private directories. That is precisely
+            # the per-member isolation requirement 4.12 exists to enforce, undone by a grant meant to help.
+            #
+            # It survived the 4.12 tests because those tests granted the board only, while the RUN LOOP
+            # granted both -- a test that exercised a narrower configuration than production. Found by the
+            # live end-to-end check, which applied the real grants and then asked whether a peer's file could
+            # be read. It could.
+            #
+            # Nothing needs this grant. A Locus's own workspace is the confinement, and the swarm's shared
+            # space is reached through `swarm_root()`, which stays granted.
             try:
                 from . import locus_swarm as _swarm_mod
 
                 tools.grant_shared("swarm", _swarm_mod.swarm_root())
-                tools.grant_shared("member-workspaces", _swarm_mod.members_dir())
             except Exception:  # noqa: BLE001 - a missing board must not stop a run
                 pass
             try:
@@ -1233,7 +1245,6 @@ def execute_locus_run(tool_input: dict, ctx: ToolContext) -> tuple[str, bool]:
                 # in this process reach a directory granted for a run that has finished -- and grants are
                 # process-global, so "later" includes an interactive turn in the same process.
                 tools.grant_shared("swarm", None)
-                tools.grant_shared("member-workspaces", None)
                 ctx.locus_workspace = previous_workspace
     except loci.RunInProgress as exc:
         # Two processes running the same locus in one workspace is not a retryable condition: the

@@ -107,12 +107,53 @@ class TestExpiryIsTheRecoveryPath:
         assert swarm.available() == []
 
     def test_renewal_keeps_a_slow_holder_alive(self, swarm):
-        """A model call can outlast a lease; without renewal two members would write a result."""
+        """A model call can outlast a lease; without renewal two members would write a result.
+
+        THIS TEST WAS WRONG AND ANOTHER TEST FILE EXPOSED IT. It claimed with a `0.01`-second lease and
+        immediately renewed, which passed alone on a fast run and failed when the suite was busier: the lease
+        had already EXPIRED by the time `renew` was called, and `renew` correctly answers False for an expired
+        lease. So the test was measuring how quickly the machine reached the next line.
+
+        `now` is passed explicitly here instead. That is not a workaround -- it is what makes the assertion
+        about the RENEWAL rather than about the clock, and it is the same fix applied to the dead-letter
+        window test after a clean clone caught that one.
+
+        The production behaviour being pinned:
+          * a renewal while the lease is live extends it, and
+          * the extension is really written to disk, so a peer reads the longer expiry.
+        """
         swarm.create_task("t1", title="one")
-        swarm.claim("t1", "alpha", lease_seconds=0.01)
-        assert swarm.renew("t1", "alpha", lease_seconds=600) is True
-        time.sleep(0.05)
-        assert swarm.available() == [], "a renewed lease must not expire"
+        swarm.claim("t1", "alpha", lease_seconds=5.0, now=100.0)
+
+        # Still inside the lease: renewal succeeds and moves the expiry out.
+        #
+        # `expires_at = now + lease_seconds` = 104 + 600 = 704, NOT 604. The first version of this assertion
+        # added the new lease to the ORIGINAL claim time, which is arithmetic the code does not do and should
+        # not do -- a renewal measured from the old claim would silently shorten a lease that was renewed
+        # late. The failure message named the real value, which is why it was a one-line fix.
+        assert swarm.renew("t1", "alpha", lease_seconds=600.0, now=104.0) is True
+        lease = swarm.read_lease("t1")
+        assert lease.expires_at == 704.0, f"renewal did not extend the lease: {lease}"
+
+        # Read back from disk, past the ORIGINAL expiry, so the extension is proven to be persisted rather
+        # than held in memory.
+        assert lease.held(200.0) is True, "the renewed lease expired on its original schedule"
+        assert swarm.available(now=200.0) == []
+
+    def test_renewing_an_expired_lease_is_refused(self, swarm):
+        """The counterpart, asserted deliberately rather than left implicit.
+
+        An expired lease has already been offered to other members, so a holder that could still renew it
+        would be claiming a task a peer may hold. The recovery path for a slow holder is `claim`, which lets
+        an expired-lease holder take its own task back when it is still unclaimed -- that is where "I am late
+        but nobody else took it" is handled, and this is where "I am late and it may be gone" is refused.
+        """
+        swarm.create_task("t1", title="one")
+        swarm.claim("t1", "alpha", lease_seconds=5.0, now=100.0)
+        assert swarm.renew("t1", "alpha", lease_seconds=600.0, now=200.0) is False
+
+        # And the same member can still recover it with a fresh claim, because nobody else took it.
+        assert swarm.claim("t1", "alpha", lease_seconds=600.0, now=200.0) is True
 
     def test_a_non_holder_cannot_renew(self, swarm):
         swarm.create_task("t1", title="one")

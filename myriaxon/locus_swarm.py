@@ -15,7 +15,7 @@ THE SHAPE
           result.md     what the holder produced
           done.json     written last, so a task is done only when its result is readable
       shared/           artifacts any member may read
-      members/<id>/     one member's own scratch space
+      members/<id>/     reserved, NOT private: it is inside the tree granted to every member
 
 WHY FILES AND NOT A SERVER
 
@@ -113,8 +113,29 @@ def ensure_layout() -> Path:
 
 
 def member_workspace(member_id: str) -> Path:
-    """A member's own scratch space inside the swarm."""
-    path = members_dir() / safe_id(member_id)
+    """A member's own scratch space, DELIBERATELY OUTSIDE the shared swarm tree.
+
+    This used to be `members_dir() / member_id`, which documented itself as "one member's own scratch space"
+    -- and was the opposite. `members_dir()` is `swarm_root()/members`, so anything placed in it sat INSIDE the
+    directory the run loop grants to every confined Locus in order for the board to be reachable. A workspace
+    under a granted root is a workspace every peer can read and write: exactly the isolation requirement 4.12
+    exists to enforce, inverted by the layout itself.
+
+    Measured, before the move:
+
+        swarm_root()       : <config>/swarm
+        member_workspace() : <config>/swarm/members/peer      <- inside the granted tree
+
+    Nothing in the package called it, so nothing leaked. It was a trap for the first feature that did.
+
+    The fix puts it where isolation is already the rule: beside the Loci's own workspaces, one level ABOVE the
+    swarm. Sharing then becomes a deliberate act -- a member puts an artifact in `shared/` -- rather than an
+    accident of where a directory happens to sit. `swarm_root()` still holds the board and `shared/`, and those
+    are the parts meant to be reachable.
+    """
+    from .constants import CONFIG_DIR
+
+    path = CONFIG_DIR / "member-workspaces" / safe_id(member_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
 

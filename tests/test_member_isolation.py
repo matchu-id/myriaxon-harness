@@ -181,7 +181,207 @@ class TestTheBoardIsReachableOnlyByGrant:
             tools._LOCUS_WORKSPACE.reset(token)
 
 
+class TestTheRealRunLoopGrants:
+    """The grants the RUN LOOP applies, not a convenient subset of them.
+
+    THIS CLASS EXISTS BECAUSE THE PREVIOUS TESTS MISSED A HOLE. Every test above grants `swarm` and then asks
+    whether a peer workspace is refused -- and passes -- while the actual run loop ALSO granted
+    `member-workspaces`, which is `members_dir()`: the PARENT of every member's own workspace. For a confined
+    Locus that meant read and write access to all of its peers' private directories, which is exactly the
+    isolation requirement 4.12 exists to enforce.
+
+    It survived because the tests exercised a NARROWER configuration than production. Found by a live
+    end-to-end check that applied the real grants and then asked whether a peer's file could be read. It could.
+
+    So these tests read the grants OUT OF THE RUN LOOP'S OWN SOURCE and apply them. A future grant added to
+    the run loop is therefore exercised here without anybody remembering to update this file -- which is the
+    only version of this guard that cannot rot.
+    """
+
+    def _grants_the_run_loop_makes(self) -> list[tuple[str, str]]:
+        """Parse `grant_shared("name", <expr>)` calls out of the run loop.
+
+        The second argument is parsed by BALANCING PARENTHESES rather than with a regex, because the real call
+        reads `grant_shared("swarm", _swarm_mod.swarm_root())` -- a regex stopping at the first `)` captures
+        `_swarm_mod.swarm_root(` and then quietly matches nothing, which is how the first version of this
+        helper returned an empty set and failed its own sanity check instead of the assertion it was written
+        for. A parser that silently finds nothing is worse than one that raises.
+        """
+        import inspect
+
+        from myriaxon import tool_registry
+
+        # `execute_locus_run`, not `_spawn_subagent_inner`. The first version of this helper read the wrong
+        # function, found no `grant_shared` calls at all, and failed its own sanity assertion -- which is the
+        # behaviour that was wanted: a parser that silently returns nothing would have made every test in this
+        # class pass for no reason.
+        #
+        # COMMENTS ARE STRIPPED FIRST, and that is not a detail. The fix for this hole is documented in the run
+        # loop with the offending line quoted verbatim:
+        #
+        #     #     tools.grant_shared("member-workspaces", _swarm_mod.members_dir())
+        #
+        # A parser reading the raw source therefore finds the bug IN THE EXPLANATION of its own fix and reports
+        # a regression that no longer exists. Code that documents a removed line has to be parsed as code.
+        raw = inspect.getsource(tool_registry.execute_locus_run)
+        source = "\n".join(
+            line.split("#", 1)[0] if "#" in line and not line.lstrip().startswith("#") else
+            ("" if line.lstrip().startswith("#") else line)
+            for line in raw.splitlines()
+        )
+        found: list[tuple[str, str]] = []
+        marker = "grant_shared("
+        position = 0
+        while True:
+            start = source.find(marker, position)
+            if start == -1:
+                break
+            position = start + len(marker)
+
+            # Find the two top-level arguments by walking to the matching close paren.
+            depth = 1
+            index = position
+            while index < len(source) and depth:
+                if source[index] == "(":
+                    depth += 1
+                elif source[index] == ")":
+                    depth -= 1
+                index += 1
+            inner = source[position : index - 1]
+
+            # Split on the first comma that is not inside a nested call or a string.
+            depth = 0
+            split_at = -1
+            in_string = False
+            for offset, char in enumerate(inner):
+                if char in "\"'":
+                    in_string = not in_string
+                elif not in_string and char in "([{":
+                    depth += 1
+                elif not in_string and char in ")]}":
+                    depth -= 1
+                elif not in_string and char == "," and depth == 0:
+                    split_at = offset
+                    break
+            if split_at == -1:
+                continue
+            name = inner[:split_at].strip().strip("\"'")
+            expr = inner[split_at + 1 :].strip()
+            if expr and expr != "None":
+                found.append((name, expr))
+        return found
+
+    def test_the_run_loop_grants_the_board(self):
+        names = {name for name, _ in self._grants_the_run_loop_makes()}
+        assert "swarm" in names, "the board must be granted or a confined Locus cannot coordinate"
+
+    def test_the_run_loop_does_not_grant_the_members_directory(self, env):
+        """The regression. A grant of the members' PARENT directory is a grant of every peer workspace."""
+        exprs = " ".join(expr for _, expr in self._grants_the_run_loop_makes())
+        assert "members_dir" not in exprs, (
+            "the run loop grants `members_dir()`, which is the parent of every member's workspace -- that "
+            "hands a confined Locus read/write access to all of its peers"
+        )
+
+    def test_every_real_grant_leaves_a_peer_workspace_refused(self, env):
+        """Apply whatever the run loop actually grants, then try to read a peer's file."""
+        tools = env["tools"]
+        swarm = env["swarm"]
+
+        # Resolve each granted expression the same way the run loop does.
+        for _, expr in self._grants_the_run_loop_makes():
+            if expr.endswith("swarm_root()"):
+                tools.grant_shared("swarm", swarm.swarm_root())
+            elif expr.endswith("members_dir()"):
+                tools.grant_shared("swarm", swarm.members_dir())
+            else:
+                pytest.fail(f"this test does not know how to resolve the grant {expr!r}; update it")
+
+        # A peer's private workspace, created inside the members directory.
+        peer = swarm.member_workspace("some-other-member")
+        (peer / "private-notes.md").write_text("peer's own work", encoding="utf-8")
+
+        token = tools.confine_to(env["w1"])
+        try:
+            with pytest.raises(tools.WorkspaceEscape):
+                tools._resolve(str(peer / "private-notes.md"))
+        finally:
+            tools._LOCUS_WORKSPACE.reset(token)
+
+    def test_the_board_stays_reachable_under_the_real_grants(self, env):
+        """The fix must not break the thing the grant was added for."""
+        tools = env["tools"]
+        swarm = env["swarm"]
+        tools.grant_shared("swarm", swarm.swarm_root())
+        token = tools.confine_to(env["w1"])
+        try:
+            assert tools._resolve(str(swarm.swarm_root() / "board"))
+        finally:
+            tools._LOCUS_WORKSPACE.reset(token)
+
+
+class TestMemberWorkspaceIsNotInsideTheGrantedTree:
+    """The layout property, asserted directly because it is invisible in the code that uses it.
+
+    `member_workspace()` returned `swarm_root()/members/<id>` and described itself as a member's OWN scratch
+    space. But `swarm_root()` is exactly what the run loop grants so the board is reachable, so anything in it
+    is readable and writable by every confined peer. Measured:
+
+        swarm_root()       : <config>/swarm
+        member_workspace() : <config>/swarm/members/peer      <- inside the granted tree
+
+    Nothing called it, so nothing leaked -- it was a trap for the first feature that did. The test below is the
+    guard that makes the layout itself the thing under test, rather than the callers happening to be careful.
+    """
+
+    def test_a_member_workspace_is_outside_the_swarm_root(self, env):
+        swarm = env["swarm"]
+        member = swarm.member_workspace("probe-member").resolve()
+        root = swarm.swarm_root().resolve()
+        with pytest.raises(ValueError):
+            member.relative_to(root)
+
+    def test_it_is_outside_every_shared_directory(self, env):
+        swarm = env["swarm"]
+        member = swarm.member_workspace("probe-member-2").resolve()
+        for shared_path in (swarm.swarm_root().resolve(),
+                            swarm.members_dir().resolve(),
+                            swarm.shared_dir().resolve(),
+                            swarm.board_dir().resolve()):
+            with pytest.raises(ValueError):
+                member.relative_to(shared_path)
+
+    def test_two_members_get_different_workspaces(self, env):
+        swarm = env["swarm"]
+        assert swarm.member_workspace("a") != swarm.member_workspace("b")
+
+    def test_a_member_id_cannot_escape_its_workspace(self, env):
+        """`safe_id` restricts rather than escapes, so a traversal id must not climb out.
+
+        Asserted against the real parent of the returned path rather than against an assumed config directory.
+        The first version compared to `swarm_root().parent`, which the fixture puts somewhere else entirely, so
+        it failed on a correct result -- `../../etc` had already been reduced to the single component `etc`.
+        """
+        from myriaxon.constants import CONFIG_DIR
+
+        swarm = env["swarm"]
+        escaped = swarm.member_workspace("../../etc").resolve()
+        expected_root = (CONFIG_DIR / "member-workspaces").resolve()
+        assert escaped.parent == expected_root, (
+            f"an id escaped its workspace: {escaped} is not directly under {expected_root}"
+        )
+        # And the traversal characters really are gone, not merely neutralised by path resolution.
+        assert ".." not in escaped.name
+
+    def test_the_shared_directories_stay_inside_the_granted_root(self, env):
+        """The complement: `shared/` and the board MUST be reachable, or coordination breaks again."""
+        swarm = env["swarm"]
+        for shared_path in (swarm.shared_dir(), swarm.board_dir()):
+            shared_path.resolve().relative_to(swarm.swarm_root().resolve())
+
+
 class TestGrantsAreAuditableAndRevocable:
+
     def test_the_grants_are_listable_by_name(self, env):
         """A named grant is one a reader can check; a widened boundary is not."""
         tools = env["tools"]
