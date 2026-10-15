@@ -1177,6 +1177,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
             if route == "/api/events":
                 return self._stream_events(query.get("session", [""])[0])
+            if route == "/api/transparency/stream":
+                return self._stream_transparency()
             if route == "/api/loci":
                 # Its own route as well as being folded into /api/config: this one re-reads the
                 # registry on every call, so the panel can poll it while a locus is running without
@@ -1208,6 +1210,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(payload)
             if route == "/api/vertex-cache":
                 return self._vertex_cache_get()
+
+            if route == "/api/transparency":
+                # GET reports the dial and the recent feed. The feed rides along with the dial rather than
+                # living on its own route because a surface always wants both: the level with no events is a
+                # blank panel, and events with no level cannot say why they stopped.
+                #
+                # A failure degrades to an explained empty payload rather than a 500. This panel is the one a
+                # person opens when something is going wrong, so it must not be the thing that breaks.
+                from .. import transparency
+
+                try:
+                    payload = transparency.describe()
+                    payload["feed"] = [e.to_dict() for e in transparency.get().recent(limit=120)]
+                except Exception as exc:  # noqa: BLE001
+                    payload = {"level": 0, "max": transparency.MAX_LEVEL, "layers": [], "feed": [],
+                               "error": f"{type(exc).__name__}: {exc}"}
+                return self._send_json(payload)
 
             if route == "/api/mission-control":
                 # Assembled server-side, never in the browser: the view must show what the machine
@@ -1259,6 +1278,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._chat()
             if route == "/api/vertex-cache":
                 return self._vertex_cache_post()
+
+            if route == "/api/transparency":
+                # Moves the dial. The body carries the level; anything unparseable leaves the dial where it is
+                # and says so, because a slider that silently ignores a movement teaches the user that the
+                # control is broken rather than that the value was wrong.
+                from .. import transparency
+
+                body = self._read_json()
+                if "level" not in body:
+                    return self._send_json({"ok": False, "error": "send {\"level\": 0-8}"}, status=400)
+                try:
+                    wanted = int(body["level"])
+                except (TypeError, ValueError):
+                    return self._send_json({"ok": False, "error": "level must be an integer"}, status=400)
+                applied = transparency.set_level(wanted)
+                payload = transparency.describe()
+                payload["ok"] = True
+                payload["applied"] = applied
+                payload["clamped"] = applied != wanted
+                payload["feed"] = [e.to_dict() for e in transparency.get().recent(limit=120)]
+                return self._send_json(payload)
 
             if route == "/api/cancel":
                 body = self._read_json()
@@ -2081,6 +2121,51 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_json({"mode": mode, "kept_history": len(session.history)})
 
     # -- SSE ----------------------------------------------------------------------
+    def _stream_transparency(self) -> None:
+        """Live activity, one server-sent event per thing that happens.
+
+        Same shape as `_stream_events` and for the same reasons: a heartbeat so an idle stream is not closed by
+        a proxy, and a `finally` that unsubscribes so a browser tab closing does not leak a queue into the
+        broadcaster for the life of the process.
+
+        The dial is sent FIRST, before any event, so a surface that connects mid-run can label what it is about
+        to receive. Without it the client knows events are arriving but not which ones are being withheld, and
+        "nothing is happening" becomes indistinguishable from "the level is too low to show it".
+        """
+        from .. import transparency
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        broadcaster = transparency.get()
+        subscriber = broadcaster.subscribe()
+        try:
+            # The dial, then whatever is already buffered, then live. A panel that opened after the interesting
+            # part should still see it.
+            if not self._write_raw(f"data: {json.dumps({'type': 'dial', **broadcaster.describe()}, default=str)}\n\n"):
+                return
+            for event in reversed(broadcaster.recent(limit=40)):
+                if not self._write_raw(transparency.as_sse(event)):
+                    return
+            while True:
+                try:
+                    event = subscriber.popleft()
+                except IndexError:
+                    time.sleep(0.25)
+                    if not self._write_raw(": ping\n\n"):
+                        return
+                    continue
+                if not self._write_raw(transparency.as_sse(event)):
+                    return
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+        finally:
+            broadcaster.unsubscribe(subscriber)
+
     def _stream_events(self, session_id: str) -> None:
         session = self.app.sessions.get(session_id)
         if session is None:

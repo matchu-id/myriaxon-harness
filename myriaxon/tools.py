@@ -1106,9 +1106,20 @@ def _run_bash(tool_input: dict, ctx: ToolContext) -> tuple[str, bool]:
     panel = Panel(Text(command), title="[tool.confirm.question]run_bash[/]", border_style="tool.confirm.question")
     proceed, blocked = confirm_action(console, panel, ctx, "run_bash", command=command, tool_input=tool_input)
     if blocked:
-        return blocked, False
+        # RETURNED AS AN ERROR, and the flag is the fix rather than the message.
+        #
+        # This was `return blocked, False` -- the refusal text with a success flag. Measured consequence: an
+        # agent that asked for a shell it was not allowed to have received "Blocked: a shell command cannot be
+        # confined..." as a NON-ERROR result, so it read the refusal as something that had happened, and the
+        # loop detector -- which keys partly on failures -- never saw a failing call. In a confined Locus this
+        # is the only outcome `run_bash` can ever produce, which makes it the whole of that agent's shell
+        # experience.
+        #
+        # The MESSAGE is unchanged and deliberately so: the tests assert it explains what to do, and it does.
+        # Only the flag changes, because "this did not run" is what an error flag means.
+        return blocked, True
     if not proceed:
-        return "User declined to run this tool call.", False
+        return "User declined to run this tool call.", True
 
     # WHAT GETS MOUNTED, and this is a confinement boundary rather than a detail.
     #

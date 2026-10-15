@@ -631,6 +631,24 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .tracelist .ts.warn { color: var(--warn); }
   .tracelist .ts.error { color: var(--err); }
   .tracelist .ts.mem { color: var(--violet); }
+  /* Untrusted text is marked, not merely stored as such: a reader should be able to tell at a glance that a
+     line came from a model or a file rather than from the harness. */
+  .tracelist .tm.untrusted { font-style: italic; }
+
+  /* The transparency dial. The layer list is the point of the panel -- a slider with no legend tells you the
+     number changed but not what you are now seeing, which is the whole question. */
+  .transdial { display: flex; flex-direction: column; gap: 10px; }
+  .transdial .transhead { font-size: 13px; }
+  .transdial input[type="range"] { width: 100%; accent-color: var(--blue); }
+  .translayers { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+  .translayer { display: grid; grid-template-columns: 18px 92px 1fr; gap: 8px; align-items: baseline;
+                font-size: 12px; opacity: .42; transition: opacity .12s ease; }
+  .translayer.on { opacity: 1; }
+  .translayer .tln { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .translayer .tlb { color: var(--text); }
+  .translayer.on .tlb { color: var(--blue); }
+  .translayer .tld { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .transdial .transfoot { font-size: 11px; }
 
   /* The core: a small live status diagram, drawn from the same health data as the list. */
   .coreslot { display: flex; align-items: center; gap: 14px; }
@@ -1406,6 +1424,13 @@ INDEX_HTML = r"""<!DOCTYPE html>
           </div>
         </div>
         <ul class="tracelist" id="mc-trace"></ul>
+      </section>
+
+      <section class="mcard">
+        <h2>Transparency</h2>
+        <p class="mnote">How much of what the machine does is shown. Each level includes everything below it,
+          so the dial never hides something a lower setting would have shown.</p>
+        <div id="trans-dial" class="transdial"></div>
       </section>
 
       <section class="mcard mgcol" style="grid-column:1/-1">
@@ -2430,6 +2455,145 @@ setLoci("happy");
     }
     addNotice(reason + " — started a new one", "warning");
     await newSession();
+  }
+
+  // ---------- transparency: the live feed and the dial ----------
+  //
+  // A SECOND EventSource, separate from the session stream below, because the two answer different questions.
+  // The session stream carries one conversation; this carries what the MACHINE is doing -- files read and
+  // written, commands run, gates refused, loci coordinating -- including the work of loci that belong to no
+  // session at all. Folding them together would leave a locus run with no session open nowhere to appear.
+  //
+  // The level arrives FIRST and again whenever the dial moves, so the client always knows which layers are
+  // being withheld. Without that a quiet feed and a low dial look identical, and a reader concludes nothing is
+  // happening when the truth is that nothing is being shown.
+
+  const LAYERS = { 1: "pulse", 2: "intent", 3: "actions", 4: "files", 5: "system", 6: "agents", 7: "decisions", 8: "memory" };
+  const LAYER_TONE = { 1: "ok", 4: "mem", 5: "warn", 6: "mem", 7: "error", 8: "mem" };
+
+  function fmtClock(seconds) {
+    const d = new Date((seconds || 0) * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
+
+  function transparencyRow(event) {
+    const li = document.createElement("li");
+    const who = document.createElement("span");
+    who.className = "tw";
+    // The locus if there is one, else the layer: a file write from a locus is that locus's work, while a
+    // decision with no locus is the harness's own.
+    who.textContent = event.locus || LAYERS[event.layer] || ("L" + event.layer);
+    const when = document.createElement("span");
+    when.className = "ts " + (LAYER_TONE[event.layer] || "");
+    when.textContent = fmtClock(event.at);
+    const what = document.createElement("span");
+    what.className = "tm";
+    what.textContent = event.summary || event.kind || "";
+    // Untrusted text stays TEXT. A tool argument or a file body came from a model or from disk, and a feed that
+    // rendered it as markup would let a file's contents act on the page reading it.
+    if (event.trusted === false) {
+      what.title = "untrusted: from a model or a file";
+      what.classList.add("untrusted");
+    }
+    li.append(who, when, what);
+    return li;
+  }
+
+  function appendTransparency(event) {
+    const list = $("mc-trace");
+    if (!list) return;
+    list.prepend(transparencyRow(event));
+    while (list.children.length > 200) list.removeChild(list.lastChild);
+  }
+
+  function wireTransparency() {
+    if (state.transparencySource) return;
+    const es = new EventSource("/api/transparency/stream");
+    state.transparencySource = es;
+    es.onmessage = (ev) => {
+      let payload; try { payload = JSON.parse(ev.data); } catch { return; }
+      if (payload.type === "dial") { renderTransparencyDial(payload); return; }
+      appendTransparency(payload);
+    };
+    // No onerror recovery: EventSource reconnects on its own, and this stream is informational. Touching
+    // `#conn` here would make the session status report the wrong thing.
+  }
+
+  function renderTransparencyDial(info) {
+    state.transparency = info;
+    const host = $("trans-dial");
+    if (!host) return;
+    const max = info.max == null ? 8 : info.max;
+    const level = info.level == null ? 0 : info.level;
+    host.innerHTML = "";
+
+    const head = document.createElement("div");
+    head.className = "transhead";
+    head.innerHTML = "<b>" + (info.name || "silent") + "</b> <span class='tm'>level " + level +
+      " of " + max + "</span>";
+    host.append(head);
+
+    const range = document.createElement("input");
+    range.type = "range";
+    range.min = "0";
+    range.max = String(max);
+    range.step = "1";
+    range.value = String(level);
+    range.id = "trans-range";
+    // `input` updates the label as it moves; `change` sends the request, so dragging does not send one PUT per
+    // pixel.
+    range.oninput = () => {
+      const shown = (info.layers || []).find((l) => l.level === Number(range.value));
+      if (shown) {
+        head.innerHTML = "<b>" + shown.name + "</b> <span class='tm'>" + shown.description + "</span>";
+      }
+    };
+    range.onchange = async () => {
+      try {
+        const res = await fetch("/api/transparency", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ level: Number(range.value) }),
+        });
+        renderTransparencyDial(await res.json());
+      } catch (err) { /* the label shows the intent; the next load reconciles */ }
+    };
+    host.append(range);
+
+    const list = document.createElement("div");
+    list.className = "translayers";
+    (info.layers || []).forEach((layer) => {
+      if (!layer.level) return;
+      const row = document.createElement("div");
+      row.className = "translayer" + (layer.level <= level ? " on" : "");
+      row.innerHTML = "<span class='tln'>" + layer.level + "</span><span class='tlb'>" + layer.name +
+        "</span><span class='tld tm'>" + layer.description + "</span>";
+      list.append(row);
+    });
+    host.append(list);
+
+    const counts = info.counts || {};
+    const seen = Object.keys(counts).filter((k) => counts[k])
+      .sort((a, b) => Number(a) - Number(b))
+      .map((k) => (LAYERS[k] || k) + " " + counts[k]).join(" · ");
+    const foot = document.createElement("div");
+    foot.className = "tm transfoot";
+    foot.textContent = (info.buffered || 0) + " buffered" + (seen ? " · " + seen : "");
+    host.append(foot);
+  }
+
+  async function loadTransparency() {
+    try {
+      const info = await api("/api/transparency");
+      renderTransparencyDial(info);
+      const list = $("mc-trace");
+      const feed = (info.feed || []).slice().reverse();
+      if (list && feed.length) {
+        list.innerHTML = "";
+        feed.forEach(appendTransparency);
+      }
+    } catch (err) { /* the panel is optional; the rest of the view must still render */ }
   }
 
   // ---------- SSE ----------
@@ -5225,6 +5389,11 @@ function renderSettings() {
       // Mission control is the landing view: it is the one that answers "what is going on" without
       // the user having to ask, and the chat is one click away.
       mcShow("mission");
+      // The transparency feed and its dial, started after the page is usable. This stream covers loci as well
+      // as sessions, so it runs even when no session is open -- and a stream that cannot connect must not stop
+      // the page from working.
+      wireTransparency();
+      loadTransparency();
       // After the page is usable, never before: the picker is a question, and a question that blocks
       // the interface is a worse first impression than a working page with a dialog over it.
       maybeAskVendor();

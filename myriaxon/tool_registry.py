@@ -1231,6 +1231,17 @@ def execute_locus_run(tool_input: dict, ctx: ToolContext) -> tuple[str, bool]:
                 tools.grant_shared("swarm", _swarm_mod.swarm_root())
             except Exception:  # noqa: BLE001 - a missing board must not stop a run
                 pass
+            # AGENTS layer: the run BEGINS. Emitted with the message that started it, because "which agent is
+            # working on what" is the question a reader arrives with, and per-call events alone cannot answer
+            # it. The message is model-adjacent text, so `agent()` carries it as untrusted detail.
+            try:
+                from . import transparency as _transparency
+
+                _transparency.agent(locus.name, f"run started: {str(tool_input.get('message') or '')[:120]}",
+                                    locus=locus.name)
+            except Exception:  # noqa: BLE001
+                pass
+
             try:
                 def turn() -> tuple[str, str]:
                     # A Locus gets the same tool set as any other delegated run; what changes is that
@@ -1239,6 +1250,12 @@ def execute_locus_run(tool_input: dict, ctx: ToolContext) -> tuple[str, bool]:
                     return _spawn_subagent(prompt, None, ctx, quiet=False, persona=persona)
 
                 outcome = loci.run_with_retry(turn, locus=locus)
+                try:
+                    from . import transparency as _transparency
+
+                    _transparency.agent(locus.name, f"run finished: {outcome}", locus=locus.name)
+                except Exception:  # noqa: BLE001
+                    pass
             finally:
                 tools._LOCUS_WORKSPACE.reset(boundary_token)
                 # Revoked with the boundary. A grant left standing would let a later, differently-confined run
@@ -1503,11 +1520,125 @@ def dispatch_tool(name: str, tool_input: dict, ctx: ToolContext) -> tuple[str, b
             guard.check_after_tool_call()
 
     _record_for_loop_detection(name, tool_input, content, failed=is_error, ctx=ctx)
+    _emit_transparency(name, tool_input, content, is_error, ctx)
     try:
         ctx.current_tool_name = previous_tool_name
     except Exception:
         pass
     return content, is_error
+
+
+def _emit_transparency(name: str, tool_input: dict, content, is_error: bool, ctx) -> None:
+    """Publish this call to the transparency feed, at the layer it belongs to.
+
+    ONE PLACE, EVERY TOOL. A feed assembled by asking each tool to report itself would be a feed with holes in
+    it exactly where somebody forgot -- and the holes would be invisible, because a missing event looks the same
+    as a quiet run. Dispatch is the single funnel every call passes through, so the event is emitted here and
+    the per-tool detail is derived from the arguments this function already has.
+
+    Three things it deliberately does:
+
+      * **A refusal is emitted, not just a success.** `is_error` results go out at the DECISIONS layer with the
+        reason, because "why did it not do the thing" is the question people actually arrive with, and a feed
+        that only shows completed work cannot answer it.
+      * **The argument is redacted before it is stored.** `transparency.emit` applies the audit log's own
+        redactor, so a credential cannot reach a UI feed by being passed as a tool argument.
+      * **Model-supplied text is marked untrusted.** A path or a command that came from a model is data, and a
+        surface must render it as data rather than as instructions -- the same rule the tool catalogue already
+        applies to foreign schemas.
+    """
+    try:
+        from . import transparency
+
+        if transparency.level() == transparency.SILENT:
+            return
+
+        run_id = ""
+        try:
+            state = getattr(ctx, "run_state", None)
+            run_id = str(getattr(state, "run_id", "") or "")
+        except Exception:  # noqa: BLE001
+            run_id = ""
+        locus = ""
+        try:
+            locus = str(getattr(getattr(ctx, "owner", None), "name", "") or "")
+        except Exception:  # noqa: BLE001
+            locus = ""
+
+        where = {"run_id": run_id, "locus": locus}
+
+        text = str(content or "")
+
+        # WAS THIS REFUSED, OR DID IT MERELY FAIL? They are different events and the first version of this
+        # function conflated them, which a single live run made obvious: a successful `read_file` was published
+        # as "refused", because `is_error` is also true for an ordinary error such as a truncated read.
+        #
+        # `confirm_action` prefixes a refusal with "Blocked:", so that is the marker. Keeping the two apart
+        # matters because the value of this layer is the refusals -- "why did it not do the thing" -- and a
+        # decision stream that also contains every soft error is a stream nobody reads.
+        refused = text.lstrip().lower().startswith("blocked:")
+
+        # ACTIONS, always: which tool, with the arguments redacted by emit().
+        transparency.action(name, tool_input, **where)
+
+        if refused:
+            transparency.decision(name, reason=text[:400], allowed=False, **where)
+        elif is_error:
+            # A genuine failure. Reported at the same layer because it answers the same question, but named
+            # differently so a reader can tell "it was not allowed" from "it did not work".
+            transparency.decision(f"{name} failed", reason=text[:400], allowed=None, **where)
+
+        path = ""
+        if isinstance(tool_input, dict):
+            path = str(tool_input.get("path") or tool_input.get("file_path") or "")
+        body = ""
+        if isinstance(tool_input, dict):
+            body = str(tool_input.get("content") or tool_input.get("new_string") or "")
+
+        if path and name in ("write_file", "edit_file", "apply_patch", "notebook_edit", "checkpoint_restore"):
+            created = text.lower().startswith(("wrote", "created"))
+            transparency.file_write(path, bytes_written=len(body), created=bool(created), **where)
+        elif path and name in ("read_file", "list_directory", "glob_search", "grep_search"):
+            transparency.file_read(path, bytes_read=len(text), **where)
+
+        if name in ("run_bash", "bash_output", "kill_bash") and isinstance(tool_input, dict):
+            command = str(tool_input.get("command") or "")
+            if command:
+                # A REFUSED command has no exit code -- it never ran. Reporting 0 would be a small lie in the
+                # direction that matters most, since this layer exists so a reader can see what executed.
+                code = None if refused else (1 if is_error else 0)
+                transparency.command(command, exit_code=code,
+                                     output_tail="" if refused else text, **where)
+
+        # AGENTS: coordination between members. Reported at its own layer because "who is talking to whom" is a
+        # different question from "which tool ran", and a reader watching several agents needs the first.
+        if isinstance(tool_input, dict):
+            member = str(tool_input.get("member") or tool_input.get("locus") or locus or "")
+            swarm_tools = {"swarm_post": "posted to the board", "swarm_claim": "claimed",
+                           "swarm_finish": "finished", "swarm_release": "released",
+                           "swarm_list": "read the board", "send_to_subagent": "messaged a sub-agent",
+                           "task": "delegated work", "parallel_tasks": "delegated work in parallel"}
+            if name in swarm_tools and member:
+                what = f"{swarm_tools[name]} {str(tool_input.get('task_id') or tool_input.get('title') or '')}".strip()
+                transparency.agent(member, what, **where)
+
+        # MEMORY: durable writes. The layer exists so "what did it keep" is answerable without reading the
+        # stores, which is the difference between an agent that remembers and an agent you can audit.
+        memory_tools = {
+            "memory_share": "shared a finding",
+            "memory_recall": "read shared memory",
+            "save_skill": "saved a skill",
+            "checkpoint_restore": "restored a checkpoint",
+            "checkpoint_list": "read the checkpoints",
+            "remember": "wrote a memory",
+            "locus_goal_update": "updated an objective",
+            "compact": "compacted the context",
+        }
+        if name in memory_tools:
+            transparency.memory(name, memory_tools[name], **where)
+    except Exception:  # noqa: BLE001
+        # A feed must never be able to fail the work it is describing.
+        pass
 
 
 def _record_for_loop_detection(
