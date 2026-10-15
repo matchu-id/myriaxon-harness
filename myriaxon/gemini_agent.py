@@ -4,6 +4,7 @@ import functools
 import json
 import os
 import time
+import uuid
 import warnings
 
 from rich.console import Console
@@ -161,6 +162,16 @@ def _attachment_parts(blocks: list, types) -> list:
     return parts
 
 
+# The model turn whose function calls are currently being appended, used only inside `_to_gemini_contents`.
+#
+# Module-level because the conversion walks a flat message list while the API needs a nested one: the grouping
+# is a property of THIS PASS over the history, not of the history itself. It is reset at the start of every
+# conversion and never persisted -- storing it would be a second source of truth for something the message
+# order already implies.
+_LAST_TURN: dict[str, str | None] = {"id": None}
+_LAST_RESULT_TURN: dict[str, str | None] = {"id": None}
+
+
 def _to_gemini_contents(messages: list[dict]) -> list:
     """Translate the stored conversation into native `types.Content` for the generateContent API.
 
@@ -169,12 +180,25 @@ def _to_gemini_contents(messages: list[dict]) -> list:
     Function calls and their responses become their own Content turns, which is what the
     generateContent protocol requires -- unlike the Interactions API, where they are sibling steps.
 
+    ONE EXCEPTION TO "THEIR OWN TURN", AND IT IS REQUIRED. Several function calls produced by a SINGLE model
+    response are replayed as one `Content` with several parts, because Vertex puts the `thought_signature` on
+    the first such part only:
+
+        part 0: keys=['functionCall', 'thoughtSignature']   signature=YES 356ch
+        part 1: keys=['functionCall']                       signature=ABSENT
+
+    Splitting them into separate Contents leaves the unsigned parts standing alone and Vertex rejects the
+    whole request with "Function call is missing a thought_signature in functionCall parts". `_gemini_turn`
+    on each stored call records which response it came from, so the grouping can be reconstructed.
+
     `user_input` messages may carry an `attachments` list of provider-neutral blocks (what
     `build_attachment_block` returns); those become inline_data parts, which is how images and PDFs
     reach Gemini.
     """
     from google.genai import types
 
+    _LAST_TURN["id"] = None
+    _LAST_RESULT_TURN["id"] = None
     contents = []
     for message in messages or []:
         kind = message.get("type")
@@ -187,18 +211,74 @@ def _to_gemini_contents(messages: list[dict]) -> list:
             # the history is sent back. Measured: the API rejects the follow-up request with
             # "Function call is missing a thought_signature in functionCall parts ... position 2"
             # and names the functionCall, not the response -- so the signature belongs here.
+            #
+            # MULTIPLE CALLS FROM ONE TURN MUST BE REPLAYED AS ONE Content, and that is the whole reason for
+            # the `_gemini_turn` grouping below. Measured against Vertex with a request asking for two tools:
+            #
+            #     part 0: keys=['functionCall', 'thoughtSignature']   signature=YES 356ch
+            #     part 1: keys=['functionCall']                       signature=ABSENT
+            #
+            # The signature is present on the FIRST functionCall part only. Replaying each call as its own
+            # `Content` therefore produces parts without a signature standing alone, and Vertex answers:
+            #
+            #     400 INVALID_ARGUMENT. Function call is missing a thought_signature in functionCall parts.
+            #     ... function call `default_api:request_tools`, position 5
+            #
+            # Which is exactly what a real Locus run hit: the model asked for two tools, the first call
+            # succeeded (the file was written), and the SECOND turn was rejected -- so a multi-tool Gemini run
+            # silently stopped after one tool.
+            #
+            # Grouping restores the response's own structure, which is what Vertex is validating against.
             signature = message.get("thought_signature")
+            turn = message.get("_gemini_turn")
             part = types.Part(
                 function_call=types.FunctionCall(name=message.get("name", ""), args=message.get("arguments") or {}),
                 thought_signature=signature or None,
             )
-            contents.append(types.Content(role="model", parts=[part]))
+            # Append to the previous model Content when this call belongs to the SAME model turn. A call with
+            # no turn id (older history, or another protocol) always starts its own Content, which is the
+            # behaviour that existed before this grouping.
+            same_turn = (
+                bool(turn)
+                and _LAST_TURN["id"] == turn
+                and contents
+                and getattr(contents[-1], "role", "") == "model"
+            )
+            if same_turn:
+                contents[-1].parts.append(part)
+            else:
+                contents.append(types.Content(role="model", parts=[part]))
+                _LAST_TURN["id"] = turn
         elif kind == "function_result":
             payload = message.get("result", "")
             part = types.Part(
                 function_response=types.FunctionResponse(name=message.get("name", ""), response={"result": payload})
             )
-            contents.append(types.Content(role="user", parts=[part]))
+            # GROUPED FOR THE SAME REASON AS THE CALLS ABOVE, and the two halves must agree. Vertex counts
+            # them: once a turn's calls share one model Content, its responses must share one user Content, or
+            # the next request is rejected with
+            #
+            #     Please ensure that the number of function response parts is equal to the number of function
+            #     call parts of the function call turn.
+            #
+            # Measured by replaying a two-call turn to Vertex: grouping only the calls turned the original
+            # thought_signature error into that one, which is strictly better (it means the signature problem
+            # was solved) but still a failed turn.
+            #
+            # A result whose turn is unknown starts its own Content, as before.
+            result_turn = message.get("_gemini_turn")
+            same_results = (
+                bool(result_turn)
+                and _LAST_RESULT_TURN["id"] == result_turn
+                and contents
+                and getattr(contents[-1], "role", "") == "user"
+                and any(getattr(p, "function_response", None) is not None for p in contents[-1].parts)
+            )
+            if same_results:
+                contents[-1].parts.append(part)
+            else:
+                contents.append(types.Content(role="user", parts=[part]))
+                _LAST_RESULT_TURN["id"] = result_turn
         elif kind == "model_output":
             parts = []
             for block in message.get("content") or []:
@@ -575,6 +655,11 @@ class GeminiAgent:
                 if not result.calls:
                     return
 
+                # One id for every call this response produced, so the history records which calls came from
+                # the SAME model turn. Vertex attaches the thought_signature to the first of them only, and
+                # the replayed Content has to keep them together.
+                turn_id = uuid.uuid4().hex[:12]
+
                 for call in result.calls:
                     name, args = call["name"], call["args"]
                     self.messages.append(
@@ -584,6 +669,10 @@ class GeminiAgent:
                             "arguments": args,
                             # Required back on this part by Gemini 3.x (see _to_gemini_contents).
                             "thought_signature": call.get("thought_signature"),
+                            # Which model response produced this call. Calls sharing a turn are replayed as ONE
+                            # Content so the single signature Vertex attaches to the first of them stays valid
+                            # for the group. Without this, a turn that asks for two tools is rejected.
+                            "_gemini_turn": turn_id,
                         }
                     )
                     content_str, is_error = tool_registry.dispatch_tool(name, args, self.tool_context)
@@ -596,6 +685,10 @@ class GeminiAgent:
                             "name": name,
                             "result": content_str,
                             "is_error": is_error,
+                            # Same turn as the call this answers, so several responses are replayed as ONE
+                            # Content. Vertex counts call parts against response parts within a turn and
+                            # rejects the request when they do not match.
+                            "_gemini_turn": turn_id,
                         }
                     )
         except BaseException:
