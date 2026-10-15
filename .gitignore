@@ -84,3 +84,7 @@ myriaxon-tests-*/
 # Local launcher variants for this machine only.
 *-local.cmd
 *-local.ps1
+
+# Scratch files left by the documented examples in docs/HOW-TO-USE.md, so a reader
+# following them does not accidentally commit one.
+*-proof.txt
