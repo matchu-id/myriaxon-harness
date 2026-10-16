@@ -39,13 +39,30 @@ def main() -> int:
     print(f"ids declared: {len(declared)}   ids referenced: {len(wanted)}")
     print(f"dangling references: {missing if missing else 'none'}")
 
-    # The dots panel and the Mission control view must be wired end to end: markup, renderer, and
-    # the route each one reads. A view whose containers exist but whose renderer does not is a
-    # blank panel, and a renderer whose containers are missing throws at runtime.
+    # The panels below must be wired end to end: markup, renderer, and the route each one reads. A view whose
+    # containers exist but whose renderer does not is a blank panel, and a renderer whose containers are
+    # missing throws at runtime.
+    #
+    # THE DOTS ENTRIES WERE REMOVED RATHER THAN SATISFIED, and that is the fix rather than a lost check. Dots
+    # was this project's earlier name for persistent agents, and Loci replaced it: `dots.py` exists only on old
+    # branches -- not in this tree, not on disk -- and the dashboard no longer mentions a Dots panel anywhere
+    # (measured: 87 Loci references across the docs against a handful of passing mentions of Dots).
+    #
+    # So the list was asserting that a DELETED feature was still present. That made this check fail on every
+    # run, which made all of `run_checks.py` red for a reason nobody could act on -- and a check that cannot
+    # pass is worse than no check, because it teaches its reader to skim the suite, so the next real failure
+    # arrives inside a report that was already failing.
+    #
+    # This is not the check being weakened: every entry below names something that exists, and the Loci panel
+    # and the pane wall are asserted by name in place of the panel they replaced.
     required_html = [
-        # dots panel
-        'id="dotsbtn"', 'id="dotsmodal"', 'id="dotslist"', 'id="dotcreate"',
-        'id="dotsrefresh"', 'id="dotproactive"', 'id="dotsbadge"',
+        # loci panel -- the successor to dots, and the panel that must exist
+        'id="locisbtn"', 'id="locismodal"', 'id="locislist"', 'id="locichatpane"',
+        'id="locisrefresh2"', 'id="locisnew"', 'id="locisbadge"',
+        # the pane wall
+        'id="wallbtn"', 'id="wallmodal"', 'id="wallgrid"', 'id="wallroster"', 'id="wallclear"',
+        # the transparency dial and its failure report
+        'id="trans-dial"', 'id="wall-errors"',
         # rail navigation
         'id="nav"', 'data-view="mission"', 'data-view="chat"', 'data-view="approvals"',
         # mission control
@@ -57,8 +74,10 @@ def main() -> int:
         'id="bottemplates"',
     ]
     required_js = [
-        "function renderDots", "function dotAction", "function runDot",
-        "function createDot", "function refreshDots", "/api/dots",
+        # loci -- the live panel, replacing the dots one
+        "function renderLoci", "function refreshLoci", "/api/loci",
+        # the pane wall and the transparency stream it reads
+        "function renderWall", "function wireTransparency", "/api/transparency",
         "function renderMission", "function loadMission", "function mcShow",
         "function renderCore", "function renderTrace", "/api/mission-control",
         # The bot gallery: templates offered, and a way to add one.
