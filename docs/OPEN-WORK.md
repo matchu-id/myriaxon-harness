@@ -33,95 +33,94 @@ thing**. Drive the **real entry point** before you mark anything done.
 
 ---
 
-## 1. BUG — the CLI prompt returns on its own, repeatedly, forever
+## 1. ~~BUG~~ FIXED — the CLI prompt returned on its own, repeatedly
 
 **Reported as:** *"the CLI always auto enter each 5 sec"*.
-**Status: mechanism traced, NOT fixed.**
+**Status: FIXED.** Kept here because the mechanism is instructive and the fix has a failure mode worth
+knowing about.
 
-### The mechanism
+### The correction that mattered
 
-`myriaxon/cli.py` arms an idle timer from prompt_toolkit's `pre_run` so a due Locus runs without anyone
-pressing Enter. **That design decision is correct** — without it, "autonomous" meant "autonomous once you
-interact", the exact failure the Loci design exists to remove. The defect is in what happens when the wake-up
-finds nothing it is **allowed** to run.
+My first reading of this was **wrong in an important way**. I framed it as a livelock to be broken by making
+the timer smarter. The owner's correction:
+
+> *"there is no wrong with wake up call, just the problem is it is locus feature only. myriaxon shouldn't have
+> L4 autonomy. the capability of self decide and plan and do something is Locus only."*
+
+That is the right frame, and it changes the fix from *tuning a timer* to *gating a feature*. Self-direction is
+the entire point of a Locus; a Myriaxon session has a **person** driving it. A prompt that returns on its own
+in Myriaxon mode is not autonomy, it is an interruption — and it cannot even succeed, because there is nothing
+for it to advance.
+
+### What was actually wrong
+
+`_arm_locus_wakeup` armed a timer in **every** session, including a plain Myriaxon one. And the loop was
+self-sustaining rather than merely useless:
 
 ```
-cli.py:1757   pre_run = lambda: _arm_locus_wakeup(session, agent)
-
-_arm_locus_wakeup:
-    limit = _dot_wakeup_limit()                               # default 15.0 s
-    delay = min(get_registry().next_wakeup_seconds(), limit)
-    loop.call_later(max(0.05, delay), _wake)
-
-_wake:   app.exit(result=LOCUS_WAKE_SENTINEL)
-cli.py:1780   if line == LOCUS_WAKE_SENTINEL: continue         # loop straight back, no input
+next_wakeup_seconds() returns 0.0 whenever anything is due
+  -> delay = max(0.05, 0.0) = 0.05s
+  -> app.exit(LOCUS_WAKE_SENTINEL)
+  -> the REPL loops back, the pass finds nothing it is ALLOWED to run, the prompt re-arms and exits again
 ```
 
-And in `loci.py`:
+Nothing ever settles because a Locus whose preflight refuses stays **permanently due** — a refused run does not
+advance `last_run_at`. Measured on this machine: `anker`, due, zero open objectives, preflight refusing.
+`due()` and `preflight()` disagree about what "due" means, and that disagreement **is** the bug.
+
+### The fix, in two halves — the second is the one easy to miss
 
 ```python
-soonest = min(d.seconds_until_due(now) for d in candidates)
-if soonest <= 0:
-    return 0.0
+# 1. Myriaxon mode never arms a timer. `active_dot` is the mode flag the prompt already used.
+if not getattr(agent.tool_context, "active_dot", "").strip():
+    return
+
+# 2. Locus mode does not arm one either when there is nothing to run.
+#    `next_wakeup_seconds()` returns the IDLE CAP (30s) in that case, and the cap exists so a
+#    deployment notices a Locus enabled in the meantime -- but for an interactive prompt the same
+#    value is a timer that fires every 30 seconds to run nothing: the same loop, merely slower.
+if not registry.headless():
+    return
 ```
 
-So when anything is due, `delay` = `max(0.05, 0.0)` = **0.05 s**. The prompt exits almost immediately, the
-REPL loops back, the proactive pass finds **nothing it is allowed to run**, the prompt is re-armed, and it
-exits again.
+`headless()` is the honest question — enabled, proactive, **and with work it is allowed to do** — so it already
+applies the preflight that `due()` skips.
 
-### Why it never settles
+**Both halves are load-bearing.** Gating on "is anything runnable" alone would still arm a timer in Myriaxon
+mode whenever some *other* Locus happened to be due.
 
-A Locus becomes **permanently due and permanently unable to run** when its preflight refuses. Measured on this
-machine:
+### Verified
 
-```
-anker   proactive=True   due=True   open objectives=0
-preflight -> ['it has no open objectives, so a run would have nothing to work on']
-```
+| Situation | Timer | |
+|---|---|---|
+| Myriaxon mode (`active_dot` empty) | **no timer** | the loop is gone |
+| Myriaxon mode, another Locus has work | **no timer** | work elsewhere is not a reason to interrupt |
+| Locus mode, nothing runnable | **no timer** | nothing to wake for |
+| Locus mode, **work waiting** | **timer at 0.05s** | the feature still works |
 
-A **refused run does not advance `last_run_at`**, so `is_due()` stays true forever, so
-`next_wakeup_seconds()` keeps returning `0.0`, so the prompt keeps self-waking — and every wake produces no
-output. Indistinguishable from a hang, with nothing on screen to explain it.
+`tests/test_wakeup_is_locus_only.py`, 9 tests. **The last row is the one that matters most** — over-gating is
+the failure mode of a fix like this, so it is asserted directly rather than assumed.
 
-The reason it is seconds and not milliseconds is `_dot_wakeup_limit()`'s **15-second idle cap**, which is the
-only thing standing between this and a spinning core. The reported "5 seconds" is the right family; **15 s is
-the value in the code** — confirm which you observe, because it says whether the cap is what is pacing it.
+The trade, stated rather than hidden: a Locus that becomes runnable while you sit at the prompt is picked up
+on your **next keypress** instead of immediately. Firing a timer under somebody's hands to discover there is
+nothing to do is worse than waiting for them.
 
-The supervisor path already solved the *reporting* half: `dashboard/server.py` `start_supervisor()` prints a
-refusal **once per distinct reason**. The REPL path says nothing.
+### What a future change must not do
 
-### The fix, and the trap in the obvious version
-
-**Do not just floor the delay at 1 second** — that trades a 15-second livelock for a 1-second one.
-
-1. `next_wakeup_seconds()` should return a **minimum re-check interval** rather than `0.0` when the only due
-   candidates are ones preflight **refuses**. A due-but-unrunnable Locus is a reason to stop asking, not a
-   reason to wake.
-2. The wake decision must consult **the same preflight the run would**. `registry.due()` and `Locus.preflight`
-   disagree about what "due" means, and that disagreement **is** the bug.
-3. Back off geometrically up to the cap, rather than re-arming at the cap value every time.
-4. Print the refusal **once** in the REPL, as the supervisor does.
-
-### Verification
-
-```
-1. Have a Locus with zero open objectives (anker is already in this state).
-2. Start `myriaxon` and type nothing.
-3. Before: the caret resets repeatedly, forever, with no output.
-   After:  the prompt sits still; next_wakeup_seconds() returns the idle cap, not 0.0.
-```
+Do **not** "fix" a wake-up problem by flooring the delay at one second. That trades a 15-second interruption
+loop for a 1-second one. The question is not *how often* to wake, it is *whether there is anything to wake
+for* — and *whether this session owns autonomy at all*.
 
 ---
 
-## 2. BUG — `MYRIAXON_DOT_WAKEUP` is named after a deleted feature and documented nowhere
+## 2. BUG (open) — `MYRIAXON_DOT_WAKEUP` is named after a deleted feature and documented nowhere
 
-`_dot_wakeup_limit()` reads `MYRIAXON_DOT_WAKEUP`. **Dots** was this project's earlier name for persistent
-agents and **Loci replaced it** — `dots.py` exists only on old branches, and the docs carry 87 Loci references
-against a handful of passing mentions of Dots.
+Still open. `_dot_wakeup_limit()` reads `MYRIAXON_DOT_WAKEUP`, and **Dots** was this project's earlier name
+for persistent agents — **Loci replaced it**. `dots.py` exists only on old branches; the docs carry 87 Loci
+references against a handful of passing mentions of Dots.
 
-Consequences: a user hitting §1 has an escape hatch they cannot find, and it is named after something that no
-longer exists. The variable appears only inside that function — not in `.env.example`, not in the README, not
-in `docs/HOW-TO-USE.md`.
+The variable appears only inside that function: not in `.env.example`, not in the README, not in
+`docs/HOW-TO-USE.md`. It is the escape hatch for the wake-up behaviour fixed above, and a user cannot find it.
 
 **Fix:** rename to `MYRIAXON_PROMPT_WAKEUP`, keep the old name working with a deprecation note, and document
 it in `.env.example` beside `MYRIAXON_TRANSPARENCY`.
@@ -234,11 +233,12 @@ python tools/run_checks.py     # confirm the baseline is green before changing a
 
 Then, in priority order:
 
-1. **Fix the CLI livelock (§1).** It makes the terminal unusable and it is one function. Watch it happen first
-   so you fix the real thing, then confirm `next_wakeup_seconds()` stops returning `0.0`.
-2. **Run the two-process swarm test (§3.1) and the two-agent wall test (§3.2).** These are the two claims the
-   whole multi-agent story rests on and neither has ever been exercised for real.
-3. **Implement the Gemini policy (§4.2).** Every measurement is already in the repository.
+1. **Run the two-process swarm test (§3.1) and the two-agent wall test (§3.2).** These are the two claims the
+   whole multi-agent story rests on, and neither has ever been exercised for real. **Start here** — they are
+   where the surprises are.
+2. **Implement the Gemini policy (§4.2).** Every measurement is already in the repository.
+3. **Rename and document the wake-up escape hatch (§2).** Small, and it is the only way a user can turn off
+   behaviour they do not want.
 
-Do not start with §4. The items in §1 and §3 are what stand between this project and being trustworthy, and
-§3 is where the surprises are.
+The CLI interruption loop (§1) is **fixed** — no action needed, but read the section before touching wake-up
+logic again, because the failure mode of that fix is over-gating.

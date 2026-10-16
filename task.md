@@ -7,21 +7,19 @@ worth less than a lower one they can. Every rule below serves that.
 
 > ## Before this task: read `docs/OPEN-WORK.md`
 >
-> That file is the **open-work register** for the whole project, written 2026-10-15 at `9782be8`. It lists the
-> confirmed bugs, the capabilities that pass their unit tests and have **never been driven end to end**, and
-> the gaps nobody has started — each labelled with **how it is known**, and each with the command that would
-> settle it.
+> That file is the **open-work register** for the whole project, written 2026-10-15. It lists the confirmed
+> bugs, the capabilities that pass their unit tests and have **never been driven end to end**, and the gaps
+> nobody has started — each labelled with **how it is known**, and each with the command that would settle it.
 >
-> **Two things in it outrank the scoring work below:**
+> **The item that outranks the scoring work below:**
 >
-> 1. **A CLI livelock** — the prompt returns on its own every ~15 seconds and never settles, whenever a Locus
->    is due but its preflight refuses it. Mechanism traced, not fixed. It makes the terminal unusable.
-> 2. **The multi-agent claims are unproven.** The swarm board is only ever tested in **one process**, and no
->    two real agents have ever been observed communicating — the wall's cross-agent join has only been tested
->    with a **synthetic injected event**.
+> **The multi-agent claims are unproven.** The swarm board is only ever tested in **one process**, and no two
+> real agents have ever been observed communicating — the wall's cross-agent join has only been tested with a
+> **synthetic injected event**. Both of the project's worst past defects were green in the suite and broken in
+> production for exactly this reason.
 >
-> An IQB-14 score earned on a harness whose core claims have never been exercised is a score for the parts
-> that were easy to test. The register is short and every entry says how to prove it.
+> An IQB-14 score earned on a harness whose core claims have never been exercised is a score for the parts that
+> were easy to test. The register is short and every entry says how to prove it.
 
 Read these first, in this order: `docs/OPEN-WORK.md` (open work and how each item is known),
 `docs/IQB-14.md` (normative), `docs/HANDOVER.md` (§1.1 principles,

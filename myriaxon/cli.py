@@ -3204,7 +3204,7 @@ def _run_audit_command(args, console) -> int:
 
 
 def _arm_locus_wakeup(session, agent) -> None:
-    """Make the idle prompt return on its own when a Locus comes due.
+    """Make the idle prompt return on its own when a Locus comes due -- INSIDE A LOCUS SESSION ONLY.
 
     Called from prompt_toolkit's `pre_run`, i.e. once the prompt's event loop is live and `app.loop` exists.
 
@@ -3215,8 +3215,38 @@ def _arm_locus_wakeup(session, agent) -> None:
 
     Deliberately quiet and defensive. A wake-up mechanism that can crash the prompt would be worse than a Locus
     that fires late, so every failure path here returns having done nothing.
+
+    AUTONOMY IS A LOCUS PROPERTY, NOT A MYRIAXON ONE -- and this function used to ignore that, which is why a
+    plain `Myriaxon` session self-woke forever.
+
+    Self-direction is the whole point of a Locus: it plans, it decides, it acts on its own objectives. A
+    Myriaxon session has none of that. The person is the driver; the agent answers. So a prompt that returns
+    on its own in Myriaxon mode is not autonomy, it is an interruption loop -- and it cannot even succeed,
+    because there is nothing for it to run.
+
+    The loop was worse than pointless, it was self-sustaining. `next_wakeup_seconds()` returns 0.0 whenever
+    anything is due, which makes the timer fire almost immediately; the pass then finds nothing it is allowed
+    to run -- a Locus whose preflight refuses stays permanently due, because a refused run does not advance
+    `last_run_at` -- so nothing happens, the prompt re-arms, and it exits again. Measured on this machine with
+    `anker`: due, zero open objectives, preflight refusing. The caret reset forever and said nothing.
+
+    THE GATE. `active_dot` is the mode flag the prompt already uses two hundred lines up: it holds the Locus's
+    name inside a Locus session and is empty in a Myriaxon one. Waking is armed only when it is set, so:
+
+        Myria >          the prompt waits for you. No timer at all.
+        <locus> >        a due Locus runs on its own, which is the feature.
+
+    `MYRIAXON_DOT_WAKEUP=0` remains as the escape hatch for anyone who wants a Locus prompt that never
+    self-wakes either.
     """
     if agent is None or getattr(agent, "tool_context", None) is None:
+        return
+    # Inside a Locus session only. See the note above: in a Myriaxon session there are no objectives to
+    # advance, so there is nothing for a wake-up to do and every wake is a pure interruption.
+    #
+    # `.strip()`, because `active_dot` is a plain string field and a whitespace value is truthy -- without it a
+    # value of `"   "` would count as "a Locus is active" and re-arm the very timer this gate removes.
+    if not getattr(agent.tool_context, "active_dot", "").strip():
         return
     limit = _dot_wakeup_limit()
     if limit is None:
@@ -3224,7 +3254,22 @@ def _arm_locus_wakeup(session, agent) -> None:
     try:
         from . import loci as _loci
 
-        delay = min(_loci.get_registry().next_wakeup_seconds(), limit)
+        registry = _loci.get_registry()
+        # NOTHING TO RUN MEANS NO TIMER AT ALL. `next_wakeup_seconds()` returns the idle cap (30s by default)
+        # when no Locus is runnable, and that cap exists so a deployment can notice a Locus enabled in the
+        # meantime. For an interactive prompt the same value is a different thing entirely: a timer that fires
+        # every 30 seconds to run nothing, which is the interruption loop again, merely slower.
+        #
+        # `headless()` is the honest question -- enabled, proactive, and with work it is ALLOWED to do, which
+        # means it already applies the preflight that `due()` ignores. Empty means there is nothing this timer
+        # could achieve, so it is not armed.
+        #
+        # The trade, stated rather than hidden: a Locus that becomes runnable while you sit at the prompt is
+        # picked up on your next keypress instead of immediately. That is the right way round here. Firing a
+        # timer under somebody's hands to discover there is nothing to do is worse than waiting for them.
+        if not registry.headless():
+            return
+        delay = min(registry.next_wakeup_seconds(), limit)
     except Exception:
         logger.exception("Could not compute the next Locus wake-up; the prompt will not self-wake.")
         return
