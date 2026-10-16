@@ -5,7 +5,26 @@
 coverage and as high as Myriaxon *honestly earns*. A score a sceptical buyer cannot reproduce is
 worth less than a lower one they can. Every rule below serves that.
 
-Read these first, in this order: `docs/IQB-14.md` (normative), `docs/HANDOVER.md` (§1.1 principles,
+> ## Before this task: read `docs/OPEN-WORK.md`
+>
+> That file is the **open-work register** for the whole project, written 2026-10-15 at `9782be8`. It lists the
+> confirmed bugs, the capabilities that pass their unit tests and have **never been driven end to end**, and
+> the gaps nobody has started — each labelled with **how it is known**, and each with the command that would
+> settle it.
+>
+> **Two things in it outrank the scoring work below:**
+>
+> 1. **A CLI livelock** — the prompt returns on its own every ~15 seconds and never settles, whenever a Locus
+>    is due but its preflight refuses it. Mechanism traced, not fixed. It makes the terminal unusable.
+> 2. **The multi-agent claims are unproven.** The swarm board is only ever tested in **one process**, and no
+>    two real agents have ever been observed communicating — the wall's cross-agent join has only been tested
+>    with a **synthetic injected event**.
+>
+> An IQB-14 score earned on a harness whose core claims have never been exercised is a score for the parts
+> that were easy to test. The register is short and every entry says how to prove it.
+
+Read these first, in this order: `docs/OPEN-WORK.md` (open work and how each item is known),
+`docs/IQB-14.md` (normative), `docs/HANDOVER.md` (§1.1 principles,
 §4.3 environment, §7 working agreement), then `myriaxon/bench/` (`assertions.py`, `scoring.py`,
 `runner.py`, `report.py`, `state.py`), the 14 folders in `myriaxon/bench/tasks/`, and
 `tests/test_bench_harness.py`.
